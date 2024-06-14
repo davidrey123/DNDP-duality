@@ -318,8 +318,6 @@ class FS_NETS:
         lbd0 = {}
         for a in self.network.links2:
             lbd0[a] = 0
-            
-        self.network.resetMsa()
  
         t0 = time.time()
         

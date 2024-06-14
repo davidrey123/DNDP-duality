@@ -383,7 +383,7 @@ class Network:
     def msa(self, type, y, lbd):
         
         #---only use if needed for comparison
-        #self.resetMsa()
+        self.resetMsa()
         
         self.setY(y)
         self.setType(type)        
