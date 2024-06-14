@@ -11,7 +11,7 @@ class FS_NETS:
         self.network = network
         self.BB_nodes = []
         self.inf = 1e+9
-        self.OA_tol = 1e-4
+        self.OA_tol = 1e-2 #---change to 1e-4 if using TAPAS
         self.nit = 0
         self.LB = 0
         self.UB = self.inf
@@ -94,6 +94,8 @@ class FS_NETS:
         
         if type == 'capacity':
             knp.maximize(sum(knp.y[a] * a.C for a in self.network.links2))
+        elif type == 'x':
+            knp.maximize(sum(knp.y[a] * a.x for a in self.network.links2))                        
         else:
             print('unknown type')
             
@@ -110,17 +112,30 @@ class FS_NETS:
             return yKNP
         
     def initOAcuts(self, can, nKNP):
+
+        lbd0 = {}
+        for a in self.network.links2:
+            lbd0[a] = 0            
         
         if self.params.PRINT_BB_INFO:
-            print('Running knapsack heuristic with',nKNP,'round(s)')        
+            print('Running knapsack heuristic with',nKNP,'round(s)')
+            
+        yKNP = {}
+        for a in self.network.links2:
+            yKNP[a] = 1
+        
+        t0_TAP = time.time()
+        tstt = round(self.network.msa('SO',yKNP,lbd0), 3) 
+        self.ydict.insertSO(yKNP, tstt)
+        self.rt_TAP += (time.time() - t0_TAP)            
         
         best = self.inf
         yinc = {}
         for n in range(nKNP):
-            yKNP = self.knapsack('capacity',can)
+            yKNP = self.knapsack('x',can)
                         
             t0_TAP = time.time()
-            tstt = round(self.network.tapas('SO',yKNP), 3) 
+            tstt = round(self.network.msa('SO',yKNP,lbd0), 3)
             self.ydict.insertSO(yKNP, tstt)
             self.rt_TAP += (time.time() - t0_TAP)
             self.OAcuts.append(self.getOAcut())                            
@@ -133,7 +148,7 @@ class FS_NETS:
                 yinc = yKNP
                 
         t0_TAP = time.time()
-        can.UB = round(self.network.tapas('UE',yinc), 3)
+        can.UB = round(self.network.msa('UE',yinc,lbd0), 3)
         self.ydict.insertUE(yinc, can.UB)
         self.rt_TAP += time.time() - t0_TAP
         self.nUE += 1
@@ -219,7 +234,7 @@ class FS_NETS:
         yOA = {}
 
         lbd0 = {}
-        for a self.network.links2:
+        for a in self.network.links2:
             lbd0[a] = 0        
         
         t0_OA = time.time()
@@ -255,7 +270,6 @@ class FS_NETS:
             
             if self.ydict.hasSO(yMILP) == True:
                 tstt = self.ydict.getSO(yMILP)
-                #print('*** hasSO ***', tstt)
             
             else:
                 t0_TAP = time.time()
@@ -302,8 +316,10 @@ class FS_NETS:
         print('---FS_NETS---')        
         
         lbd0 = {}
-        for a self.network.links2:
+        for a in self.network.links2:
             lbd0[a] = 0
+            
+        self.network.resetMsa()
  
         t0 = time.time()
         
@@ -379,7 +395,7 @@ class FS_NETS:
                 
                 else:
                     t0_TAP = time.time()
-                    can.UB = round(self.network.tapas('UE',yUB), 3)
+                    can.UB = round(self.network.msa('UE',yUB,lbd0), 3)
                     self.ydict.insertUE(yUB, can.UB)
                     self.rt_TAP += time.time() - t0_TAP
                     self.nUE += 1

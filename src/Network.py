@@ -276,16 +276,13 @@ class Network:
     
     # returns the total system travel time
     def getTSTT(self, type):
+        
         output = 0.0
-        for ij in self.links:
-            #if ij.y == 1 or ij.x > len(self.origins) * self.params.flow_epsilon:
-            if ij.y == 1:
-                tt = ij.getTravelTime(ij.x, type)
-                output += ij.x * tt
+        for a in self.links:
+            if a.y == 1:
+                tt = a.getTravelTime(a.x, type)
+                output += a.x * tt
                 
-            #if ij.y == 0 and ij.x > len(self.origins) * self.params.flow_epsilon * 10:
-            #    print(ij, ij.y, ij.x, tt)
-            #    raise Exception("crash")
         return output
     
     def validateLinkFlows(self):
@@ -375,8 +372,19 @@ class Network:
         for a in self.links:
             Lx += a.x * a.getTravelTime(a.x, 'L')            
         return Lx
+    
+    def resetMsa(self):
+        
+        self.params = Params.Params()
+        
+        for a in self.links:
+            a.x = 0
 
     def msa(self, type, y, lbd):
+        
+        #---only use if needed for comparison
+        #self.resetMsa()
+        
         self.setY(y)
         self.setType(type)        
         
@@ -532,19 +540,9 @@ class Network:
                 if self.params.PRINT_TAPAS_INFO:
                     print("Adjusting parameters due to small gap "+str(self.params.pas_cost_mu)+" "+str(self.params.line_search_gap))
                 
-
             
             last_iter_gap = gap
-            iter += 1
-            
-    
-        #if iter > 98:
-        #    for r in self.origins:
-            #if r.id == 22:
-        #        r.bush.printFlows()
-                
-        #    raise Exception("convergence failed")
-            
+            iter += 1            
             
         return self.getTSTT('UE')
             

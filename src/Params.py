@@ -31,7 +31,7 @@ class Params:
         
         self.tapas_max_iter = 100
         self.min_gap = 1E-3
-        self.msa_max_iter = 500
+        self.msa_max_iter = 1000
     
         self.warmstart = False
         
