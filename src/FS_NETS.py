@@ -217,6 +217,10 @@ class FS_NETS:
         UB_OA = self.inf
         LB_OA = 0.0 #---value to be returned that will serve as the LB of the BB node
         yOA = {}
+
+        lbd0 = {}
+        for a self.network.links2:
+            lbd0[a] = 0        
         
         t0_OA = time.time()
         
@@ -255,7 +259,7 @@ class FS_NETS:
             
             else:
                 t0_TAP = time.time()
-                tstt = round(self.network.tapas('SO',yMILP), 3)                
+                tstt = round(self.network.msa('SO',yMILP,lbd0), 3)                
                 self.ydict.insertSO(yMILP, tstt)
                 self.rt_TAP += time.time() - t0_TAP
                 self.OAcuts.append(self.getOAcut())
@@ -297,7 +301,9 @@ class FS_NETS:
         
         print('---FS_NETS---')        
         
-        self.network.resetTapas()
+        lbd0 = {}
+        for a self.network.links2:
+            lbd0[a] = 0
  
         t0 = time.time()
         
@@ -348,7 +354,7 @@ class FS_NETS:
                     #---solve UE-TAP at root node to get initial UB
                     if self.nBB == 0:
                         t0_TAP = time.time()
-                        can.UB = round(self.network.tapas('UE',yOA), 3)
+                        can.UB = round(self.network.msa('UE',yOA,lbd0), 3)
                         self.rt_TAP += time.time() - t0_TAP
                         self.nUE += 1
                         
