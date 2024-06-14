@@ -370,11 +370,10 @@ class Network:
                 r.bush.addLinks(newlinks)
                 r.bush.removeLinks(removedlinks)
                 
-    def getLx(self, y, lbd):
+    def getLx(self):
         Lx = 0
         for a in self.links:
-            Lx += a.x * a.getTravelTime(a.x, 'L')
-            
+            Lx += a.x * a.getTravelTime(a.x, 'L')            
         return Lx
 
     def msa(self, type, y, lbd):
