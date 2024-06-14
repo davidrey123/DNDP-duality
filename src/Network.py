@@ -49,7 +49,7 @@ class Network:
         numNodes = 0
         numLinks = 0
         newLinks = 0
-        #with open('result8.txt', 'a') as file, contextlib.redirect_stdout(file):
+        
         file = open(netFile, "r")
 
         line = ""
@@ -101,7 +101,6 @@ class Network:
             
             self.TC += cost
             
-            #with open('result5.txt', 'w') as file, contextlib.redirect_stdout(file):
             link = Link.Link(id, start ,end, t_ff, C, alpha, beta, cost)
             id = id +1
             #print(start,end)
@@ -111,34 +110,22 @@ class Network:
             if i >= numLinks:
                 self.links2.append(link)
             
-            #with open('result6.txt', 'a') as file, contextlib.redirect_stdout(file):
-            #print(f"Start Node: {start}, End Node: {end}")
-            #print(link)
         file.close()
-
-        #with open('result6.txt', 'a') as file, contextlib.redirect_stdout(file):
-            #print(start,end)
-            #print(self.links)
-
 
     def readTrips(self,tripsFile,scal_time,scal_flow):
         
-        file = open(tripsFile, "r")
+        file = open(tripsFile, "r")        
+        lines = file.readlines()  
         
-        lines = file.readlines()
-        
-        line_idx = 0
-        
+        line_idx = 0        
         while lines[line_idx].strip() != "<END OF METADATA>":
             line_idx += 1
             
-        line_idx += 1
-        
+        line_idx += 1        
         while lines[line_idx].strip() == "":
             line_idx += 1
             
-        r = None
-        
+        r = None        
         idx = 0
         
         splitted = lines[line_idx].split()
@@ -219,10 +206,8 @@ class Network:
         for link in i.getOutgoing():
             if link.getEnd() == j:
                 return link
-
         return None
     
-
     def dijkstras(self, origin, type):
         
             for n in self.nodes:
@@ -233,7 +218,6 @@ class Network:
 
             Q = Heap.Heap()
             Q.insert(origin)
-            #print(f"This is Q {Q}")
 
             while Q.size() > 0:
 
@@ -265,7 +249,6 @@ class Network:
                 curr = curr.pred.start
               
         #print('trace',r,s,output)
-              
         return output
         
     def traceTree(self, tree, r, s):
@@ -387,7 +370,14 @@ class Network:
                 r.bush.addLinks(newlinks)
                 r.bush.removeLinks(removedlinks)
                 
-
+    def getLx(self, y, lbd):
+        Lx = 0
+        for a in self.links:
+            Lx += a.x * a.getTravelTime(a.x, 'TT')
+            if a in y:
+                Lx += lbd[a]*a.x
+            
+        return Lx
 
     def msa(self, type, y, lbd):
         self.setY(y)
