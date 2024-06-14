@@ -24,7 +24,10 @@ class Link:
             end.addIncomingLink(self)
             
         self.xstar = 0
-        self.dual = 0 # for CG
+        self.lbdcost = 0
+
+    def setlbdCost(self, lbdcost):
+        self.lbdcost = lbdcost    
 
     def setFlow(self, x):
         self.x = x
@@ -33,7 +36,7 @@ class Link:
         return str(self)
 
     def getTravelTime(self, x, type):
-        if self.y == 0 and type != 'RC':
+        if self.y == 0 and type != 'L':
             return Params.INFTY
             
         if type == 'UE':
@@ -42,9 +45,12 @@ class Link:
         elif type == 'SO':
             output = self.t_ff * (1 + self.alpha * pow(x / self.C, self.beta))
             output += x * self.t_ff * self.alpha * self.beta * pow(x / self.C, self.beta-1) / self.C
-            
-        elif type == 'RC':
-            output = -self.dual
+
+        #---lagrangian
+        elif type == 'L':
+            output = self.t_ff * (1 + self.alpha * pow(x / self.C, self.beta))
+            output += x * self.t_ff * self.alpha * self.beta * pow(x / self.C, self.beta-1) / self.C
+            output += self.lbdcost
             
         else:
             raise Exception("wrong type "+str(type))
