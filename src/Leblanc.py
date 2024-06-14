@@ -64,9 +64,11 @@ class Leblanc:
     def BB(self):
         
         print('---Leblanc---')    
+
+        lbd0 = {}
+        for a self.network.links2:
+            lbd0[a] = 0
         
-        self.network.resetTapas()
- 
         t0 = time.time()
     
         conv = False
@@ -116,16 +118,13 @@ class Leblanc:
                        
                     #---LB is obtained from SO-TAP with unfixed links opened
                     t0_TAP = time.time()
-                    can.LB = round(self.network.tapas('SO',y), 3)
+                    can.LB = round(self.network.msa('SO',y,lbd0), 3)
                     self.rt_TAP += time.time() - t0_TAP
                     self.nSO += 1
                     
                     for a in self.network.links2:
                         can.score[a.id] = round(a.x * a.getTravelTime(a.x,'SO'), 3)
                         
-                        #if self.params.PRINT_BB_INFO:
-                        #    print('--> y/score: %d\t%s\t%d\t%.1f' % (a.id, (a.start.id,a.end.id), y[a], can.score[a.id]))
-                 
                 if can.LB >= self.UB:
                     if self.params.PRINT_BB_INFO:
                         print('--> prune by bounding')
@@ -137,7 +136,7 @@ class Leblanc:
             if integral == True:
                                 
                 t0_TAP = time.time()
-                can.UB = round(self.network.tapas('UE',yUB), 3)
+                can.UB = round(self.network.msa('UE',yUB,lbd0), 3)
                 self.rt_TAP += time.time() - t0_TAP
                 self.nUE += 1
                 
