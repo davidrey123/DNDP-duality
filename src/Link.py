@@ -46,11 +46,11 @@ class Link:
             output = self.t_ff * (1 + self.alpha * pow(x / self.C, self.beta))
             output += x * self.t_ff * self.alpha * self.beta * pow(x / self.C, self.beta-1) / self.C
 
-        #---lagrangian
+        #---Lagrangian
         elif type == 'L':
             output = self.t_ff * (1 + self.alpha * pow(x / self.C, self.beta))
             output += x * self.t_ff * self.alpha * self.beta * pow(x / self.C, self.beta-1) / self.C
-            output += self.lbdcost
+            output += x * self.lbdcost
             
         else:
             raise Exception("wrong type "+str(type))
