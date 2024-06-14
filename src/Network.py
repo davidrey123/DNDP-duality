@@ -373,9 +373,7 @@ class Network:
     def getLx(self, y, lbd):
         Lx = 0
         for a in self.links:
-            Lx += a.x * a.getTravelTime(a.x, 'TT')
-            if a in y:
-                Lx += lbd[a]*a.x
+            Lx += a.x * a.getTravelTime(a.x, 'L')
             
         return Lx
 
