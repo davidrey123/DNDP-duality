@@ -389,17 +389,18 @@ class Network:
                 
 
 
-    def msa(self, type, y):
+    def msa(self, type, y, lbd):
         self.setY(y)
         self.setType(type)        
         
         max_iteration = self.params.tapas_max_iter
         min_gap = self.params.min_gap
-        
+
+        for a in self.links2:
+            a.setlbdCost(lbd[a]*y[a] + self.inf*(1 - y[a]))
        
         if self.params.PRINT_TAP_ITER:
             print("Iteration\tTSTT\tSPTT\tgap\tAEC")
-        
         
         for iteration in range(1, max_iteration + 1):
             self.calculateAON()
@@ -419,6 +420,8 @@ class Network:
                 break
         
         return self.getTSTT('UE')
+
+
         
     def resetTapas(self):
         for r in self.origins:
