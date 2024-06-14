@@ -1,0 +1,13 @@
+<NUMBER OF ZONES> 3
+<TOTAL OD FLOW> 200.0
+<END OF METADATA>
+
+
+Origin 	1 
+    1 :      0.0;     2 :    100; 3 : 100;
+
+Origin 	2 
+    1 :    0.0;     2 :      0.0;    3 : 0;
+
+Origin 3
+	1 :    0.0;     2 :      0.0;    3 : 0;
