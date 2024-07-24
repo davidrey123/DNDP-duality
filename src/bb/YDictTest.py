@@ -1,13 +1,14 @@
 # Created on : May 22, 2024, 11:13:03 AM
 # Author     : michaellevin
 
-from src import Network
-from src import YDict
+from src.tapas import Network
+from src.bb import YDict
+
 
 def test():
     net = 'SiouxFalls'
     ins = 'SF_DNDP_10_6'
-    network = Network.Network(net,ins,0.5,1e-0,1e-3)
+    network = Network.Network(net, ins, 0.5, 1e-0, 1e-3)
     
     y1 = {}
 

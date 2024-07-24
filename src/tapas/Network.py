@@ -1,16 +1,11 @@
-from src import Node
-from src import Link
-from src import Path
-from src import Zone
-from src import Bush
+from src.tapas import Node, PASList, Heap, Path, Link, Bush, Zone
 from src import Params
-from src import PASList
-from src import Heap
+
 
 class Network:
 
-    # construct this Network with the name; read files associated with network name
-    def __init__(self,name,ins,B_prop,scal_time,scal_flow):
+    # construct this Network from files in directoty datadir
+    def __init__(self,datadir,ins,B_prop,scal_time,scal_flow):
         self.nodes = [] 
         self.links = []
         self.zones = []
@@ -30,8 +25,8 @@ class Network:
         if len(ins) == 0:
             ins = "net"
             
-        self.readNetwork("data/"+name+"/"+ins+".txt",scal_time,scal_flow)
-        self.readTrips("data/"+name+"/trips.txt",scal_time,scal_flow)
+        self.readNetwork(datadir+ins+".txt",scal_time,scal_flow)
+        self.readTrips(datadir+"trips.txt",scal_time,scal_flow)
         
         self.B = self.TC * B_prop # budget        
         
@@ -101,7 +96,7 @@ class Network:
             
             self.TC += cost
             
-            link = Link.Link(id, start ,end, t_ff, C, alpha, beta, cost)
+            link = Link.Link(id, start, end, t_ff, C, alpha, beta, cost)
             id = id +1
             #print(start,end)
             self.links.append(link)

@@ -1,8 +1,8 @@
 # Created on : May 18, 2024, 10:39:11 AM
 # Author     : michael
 
-from src import Heap
-from src import Node
+from src.tapas import Node, Heap
+
 
 def test():
     

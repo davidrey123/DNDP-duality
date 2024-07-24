@@ -1,6 +1,7 @@
 import time
-from src import BB_node
 from src import Params
+from src.bb import BB_node
+
 
 class Leblanc:
 

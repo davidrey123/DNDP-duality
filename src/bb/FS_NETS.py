@@ -1,7 +1,6 @@
 import time
-from src import BB_node
 from src import Params
-from src import YDict
+from src.bb import BB_node, YDict
 from docplex.mp.model import Model
 
 class FS_NETS:

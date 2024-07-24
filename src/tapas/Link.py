@@ -1,5 +1,6 @@
 from src import Params
 
+
 class Link:
 
     # construct this Link with the given parameters
@@ -46,6 +47,9 @@ class Link:
             output = self.t_ff * (1 + self.alpha * pow(x / self.C, self.beta))
             output += x * self.t_ff * self.alpha * self.beta * pow(x / self.C, self.beta-1) / self.C
 
+        elif type == 'PRIM':
+            output = self.t_ff * (1 + self.alpha * pow(x / self.C, self.beta) / (self.beta+1))
+
         #---Lagrangian
         elif type == 'L':
             output = self.t_ff * (1 + self.alpha * pow(x / self.C, self.beta))
@@ -71,7 +75,7 @@ class Link:
         return self.x
         
     def __str__(self):
-        return "(" + str(self.start.getId()) + ", " + str(self.end.getId()) + ")"
+        return "(" + str(self.start.getId()) + "," + str(self.end.getId()) + ")"
         
     def addXstar(self, flow):
         self.xstar += flow   

@@ -1,4 +1,4 @@
-from src import Node
+from src.tapas import Node
 
 
 class Zone(Node.Node):
