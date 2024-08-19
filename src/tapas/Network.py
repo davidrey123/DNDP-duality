@@ -243,7 +243,7 @@ class Network:
                 output.add(ij)
                 curr = curr.pred.start
               
-        #print('trace',r,s,output)
+        # print('trace',r,s,output)
         return output
         
     def traceTree(self, tree, r, s):
@@ -292,8 +292,7 @@ class Network:
                 print(ij, ij.x, totbushflow, ij.x-totbushflow, ij.getTravelTime(ij.x, self.type))
                 output = False
         return output
-            
-    
+
     # returns the total system travel time if all demand is on the shortest path
     def getSPTT(self, type):
         output = 0.0
@@ -320,18 +319,15 @@ class Network:
     def getAEC(self):
         return (self.getTSTT() - self.getSPTT()) / self.getTotalTrips()
 
-
     # find the step size for the given iteration number
     def calculateStepsize(self, iteration):
         return 1.0 / iteration
-        #print(1.0 / iteration)
-
+        # print(1.0 / iteration)
 
     # calculate the new X for all links based on the given step size
     def calculateNewX(self, stepsize):
         for ij in self.links:
             ij.calculateNewX(stepsize)
-
 
     # calculate the all-or-nothing assignment
     def calculateAON(self):
@@ -377,7 +373,7 @@ class Network:
 
     def msa(self, type, y, lbd):
         
-        #---only use if needed for comparison
+        # ---only use if needed for comparison
         self.resetMsa()
         
         self.setY(y)
@@ -387,7 +383,12 @@ class Network:
         min_gap = self.params.min_gap
 
         for a in self.links2:
-            a.setlbdCost(lbd[a]*y[a] + self.inf*(1 - y[a]))
+            if type == 'AUEL':
+                assert y[a] == 1 and len(lbd[a]) == 2
+                a.setlbdCost(lbd[a][0])
+                a.setlbdCost2(lbd[a][1])
+            else:
+                a.setlbdCost(lbd[a]*y[a] + self.inf*(1 - y[a]))
        
         if self.params.PRINT_TAP_ITER:
             print("Iteration\tTSTT\tSPTT\tgap\tAEC")
@@ -411,8 +412,6 @@ class Network:
         
         return self.getTSTT('UE')
 
-
-        
     def resetTapas(self):
         for r in self.origins:
             r.bush = None

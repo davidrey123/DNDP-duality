@@ -26,9 +26,13 @@ class Link:
             
         self.xstar = 0
         self.lbdcost = 0
+        self.lbdcost2 = 0
 
     def setlbdCost(self, lbdcost):
         self.lbdcost = lbdcost    
+
+    def setlbdCost2(self, lbdcost2):
+        self.lbdcost2 = lbdcost2
 
     def setFlow(self, x):
         self.x = x
@@ -50,15 +54,21 @@ class Link:
         elif type == 'PRIM':
             output = self.t_ff * (1 + self.alpha * pow(x / self.C, self.beta) / (self.beta+1))
 
-        #---Lagrangian
+        # ---Lagrangian
         elif type == 'L':
             output = self.t_ff * (1 + self.alpha * pow(x / self.C, self.beta))
             output += x * self.t_ff * self.alpha * self.beta * pow(x / self.C, self.beta-1) / self.C
             output += self.lbdcost
 
+        # SODNDP:  lagrangian x(t(x)+l)
         elif type == 'UEL':
             output = self.t_ff * (1 + self.alpha * pow(x / self.C, self.beta))
             output += self.lbdcost
+
+        # SODNDP:  augmented lagrangian x(t(x)+(1-y)(l+x.r/2))
+        elif type == 'AUEL':
+            output = self.t_ff * (1 + self.alpha * pow(x / self.C, self.beta))
+            output += self.lbdcost + self.lbdcost2 * x
 
         else:
             raise Exception("wrong type "+str(type))

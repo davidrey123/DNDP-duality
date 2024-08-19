@@ -124,7 +124,7 @@ class PAS:
     def isFlowEffective(self, flow_mu, minflow, type):
         # min flow of high cost segment
         # high cost segment is backwards links
-        maxshift = 1e9; 
+        maxshift = 1e9
         flowlastsegment = 0
         
         lookat = self.backwardlinks

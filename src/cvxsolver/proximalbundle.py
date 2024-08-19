@@ -1,95 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Jul 24 17:28:06 2024
+Created on Mon Jul 30 14:18:18 2024
 
-A library of numerical agorithms for convex optimization unconstrained or on the positive quadrant:
-- subgradient algorithm
-- inexact proximal bundle method (port of Oliveira's Matlab code https://sites.google.com/site/wdeolive/solvers)
+Inexact proximal bundle method
+Port in Python of Oliveira's Matlab code https://sites.google.com/site/wdeolive/solvers
 
 @author: Sophie Demassey
 """
 
-# import math
+from src.cvxsolver.cvxsolver import CvxSolver, Oracle, logger
 import gurobipy as gp
 from gurobipy import GRB
-import time
-import logging
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-class Oracle:
-    """Abstract oracle: get the zero and first order information for a convex function f defined over R^n
-        oracle: Oracle objectmapping x -> (f(x), g, s) with f convex, g a subgradient of f at x, s
-        positive_quadrant: is f defined on x >= 0 or not ?
-    """
-
-    def __init__(self, id_: str, positive_quadrant=False):
-        self.id: str = id_
-        self.positive_quadrant = positive_quadrant
-
-    def oracle(self, x):
-        """ get the zero and first information at point x as a tuple
-
-         Args:
-             x: point where to evaluate the function
-
-         Returns:
-               f(x): (float) value of the function at x
-               g: (list) a subgradient of the function f at x
-               y: (list) primal solution when f(x) is an optimization problem f(x)=max_y g(x,y)
-        """
-        pass
-
-    def primal(self):
-        pass
-
-    def solve_primal(self, x):
-        pass
-
-
-class CvxSolver:
-    """Abstract solver: minimizes a convex function f on R^n or R^n_+ given first order information.
-
-        oracle: Oracle object defining function f and, possibly, nonnegative constraints
-
-        MAX_ITER: maximum iteration number
-        TOL: optimality tolerance value
-        xc: the stability center at the current iteration
-        fxc: the function value at xc at the current iteration
-    """
-    MAX_ITER = 200
-    TOL = 1e-7
-
-    def __init__(self):
-        self.oracle_obj = None
-        self.xc = None
-        self.fxc = 0
-        self.iters = {}
-        self.starttime = 0
-        self.final_solution = {}
-
-    def set_oracle(self, oracle: Oracle):
-        self.oracle_obj = oracle
-
-    def oracle(self, x):
-        return self.oracle_obj.oracle(x)
-
-    def primal(self):
-        return self.oracle_obj.primal()
-
-    def solve_primal(self, x):
-        return self.oracle_obj.solve_primal(x)
-
-    def solve(self, x0):
-        pass
-
-    def time(self):
-        return time.perf_counter() - self.starttime
-
-    def set_final_solution(self, primal_solution=None):
-        self.final_solution = (self.fxc, self.xc, self.iters, primal_solution)
 
 
 class ProximalBundle(CvxSolver):
@@ -115,22 +37,21 @@ class ProximalBundle(CvxSolver):
     BDL_SZ_MAX = 500
     PRIMAL = True
 
-    def __init__(self):
-        CvxSolver.__init__(self)
+    def __init__(self, oracle: Oracle):
+        CvxSolver.__init__(self, oracle)
         self.prox = self.PROX_INIT
-        self.bundle = []
-        self.nbsteps = {}
+        self.bundle = None
+        self.nbsteps = None
         self.noisatt = False
 
     def init_solve(self):
-        self.xc = None
-        self.fxc = 0
-        self.final_solution = {}
-        self.iters = {}
+        CvxSolver.init_solve(self)
         self.prox = self.PROX_INIT
-        self.starttime = time.perf_counter()
+        self.bundle = []
         self.nbsteps = {"consnull": 0, "consserious": 0, "serious": 0}
         self.noisatt = False
+        labels = ("lb", "heurlb") if self.oracle_obj.has_lb() else ()
+        CvxSolver.set_iters_label(self, labels + ("prox", "errarg"))
 
     def update_serious(self, proxtmp):
         self.nbsteps["consnull"] = 0
@@ -150,14 +71,6 @@ class ProximalBundle(CvxSolver):
         if self.nbsteps["consnull"] > 0 and not self.noisatt:
             self.prox = min(self.prox, max(proxtmp, self.prox / self.PROX_UPDATE, self.PROX_MIN))
 
-    def store_iteration(self, it, fx, erragg, normsgagg):
-        self.iters[it] = (fx, self.fxc, self.nbsteps['serious'], self.prox, erragg, normsgagg, self.time())
-        logging.info(f"It {it}({self.nbsteps['serious']}): fxc={self.fxc:.5f} "
-                     f"prox={self.prox:.5f} err={erragg:.5f} |sg|={normsgagg:.5f} time={self.time():0.2f}")
-        # with open("Results.csv", "a+", newline="") as output:
-        #    output_writer = csv.writer(output)
-        #    output_writer.writerow(self.iters[it])
-
     def solve(self, x0):
         """ Run the proximal bundle algorithm starting from point x0 and returns a minimizer given tolerance and limits.
 
@@ -170,11 +83,10 @@ class ProximalBundle(CvxSolver):
         self.init_solve()
         lb = - GRB.INFINITY
 
-        self.xc = x0
+        self.xc = list(x0)
         self.fxc, gxc, sxc = self.oracle(self.xc)
-        logging.info(f"init: {self.fxc}")
+        logger.info(f"init: {self.fxc}")
         self.bundle = [[gxc, 0, sxc]]
-
         for it in range(self.MAX_ITER):
 
             # FIND NEW CANDIDATE OR STOP
@@ -184,24 +96,19 @@ class ProximalBundle(CvxSolver):
 
             # ORACLE
             fx, gx, sx = self.oracle(x)
-            logging.debug(f"oracle: {fx}")  # , gx) #x, gx)
+            logger.debug(f"oracle: {fx}")  # , gx) #x, gx)
             violations = [g for g in gx if g > 1e-5]
             if violations:
-                logging.debug(f"violations: nb= {len(violations)}/{len(gx)}, max = {max(violations):.3f}")
+                logger.debug(f"violations: nb= {len(violations)}/{len(gx)}, max = {max(violations):.3f}")
             bdlsize = len(self.bundle)
             proxtmp = 2 * self.prox * (1 + (self.fxc - fx) / decr_predict)
+            serious = False
 
-            # PRIMAL HEURISTIC
-            if self.primal():
-                heurlb = self.solve_primal(self.xc)
-                logger.debug(f"heurlb {heurlb}")
-                if lb < heurlb:
-                    lb = heurlb
-                    logger.info(f"new lb {lb}")
-
+            heurlb = self.update_lb()
 
             # DESCENT TEST: SERIOUS STEP ?
             if fx <= self.fxc - self.LINE_SEARCH * decr_predict:
+                serious = True
                 for k in range(bdlsize):
                     self.bundle[k][1] += (fx - self.fxc
                                           + sum(self.bundle[k][0][i] * (self.xc[i] - xi) for i, xi in enumerate(x)))
@@ -215,7 +122,7 @@ class ProximalBundle(CvxSolver):
                 errx = self.fxc - fx + sum(gx[i] * (xi - self.xc[i]) for i, xi in enumerate(x))
                 self.update_null(proxtmp)
 
-            self.store_iteration(it, fx, erragg, normsgagg)
+            self.store_iteration(serious, it, fx, normsgagg, [self.lb, heurlb, self.prox, erragg])
 
             # UPDATE BUNDLE
             if len(self.bundle) < self.BDL_SZ_MAX:
@@ -227,7 +134,7 @@ class ProximalBundle(CvxSolver):
                 solagg = self.aggregate_primal_solution(mu)
                 self.compress_bundle([gx, errx, sx], [sgagg, erragg, solagg], mu)
 
-        logger.info('max iter reached')
+        logger.info(f"STOP:  iteration = {self.MAX_ITER}")
         self.set_final_solution()
         return self.final_solution
 
@@ -239,9 +146,10 @@ class ProximalBundle(CvxSolver):
 
         # STOPPING TEST alternative: if (erragg + sgagg.xc <= tol) and (normsgagg <= 1000 * tol)
         ff = 1 + abs(self.fxc)
-        if (erragg <= self.TOL * ff) and (normsgagg <=  self.TOL * ff):
-            logger.info(f"STOP ! erragg: {erragg}, |sgagg|: {normsgagg}")
-            self.set_final_solution(self.aggregate_primal_solution(mu))
+        if (erragg <= self.TOL * ff) and (normsgagg <= self.TOL * ff):
+            logger.info(f"STOP: erragg: {erragg}, |sgagg|: {normsgagg}")
+            aggregate_sol = self.aggregate_primal_solution(mu)
+            self.set_final_solution()
         # noise attenuation [Kiwiel06]; decuple t if erragg is overly negative and solve again
         elif erragg <= -0.999 * 2 * proximity and nb_noisatt < self.MAX_NOISE:
             self.prox *= 10
@@ -363,7 +271,7 @@ class ProximalBundle(CvxSolver):
                                for i in range(nbvars)]
             else:
                 solagg[var] = sum(v * self.bundle[k][2][var] for k, v in enumerate(mu) if abs(v) > 1e-10)
-        return solagg
+        return 0, solagg
         # return [sum(v * bundle[i][2][j] for i, v in enumerate(mu) if v > 1e-10) for j in range(dim)]
 
     def compress_bundle(self, bx, bagg, mu):
@@ -408,85 +316,3 @@ def twominidx(a):
             else:
                 imin2 = i
     return imin, imin2
-
-
-class SubGradient(CvxSolver):
-    """Subgradient Algorithm.
-        LB_INIT: best known lower bound
-        AGILITY_INIT: agility parameter to update the time step
-        xc: the stability center at the current iteration
-        fxc: the function value at xc at the current iteration
-        prox: the proximal parameter  at the current iteration
-        bundle: the bundle [[sg^k, err^k, sol^k] for k]  at the current iteration
-        nbsteps: the information on null and serious steps at the current iteration
-        noiseatt: the status of noise attenuation at the current iteration
-    """
-    AGILITY_MAX = 5e-1
-
-    def __init__(self, lb_init: float):
-        CvxSolver.__init__(self)
-        self.bundle = []
-        self.nbsteps = {}
-        self.lb_init = lb_init
-        self.lb = lb_init
-
-    def init_solve(self):
-        self.xc = None
-        self.fxc = 0
-        self.final_solution = {}
-        self.iters = {}
-        self.lb = self.lb_init
-        self.starttime = time.perf_counter()
-        self.nbsteps = {"serious": 0}
-
-    def store_iteration(self, it, fx, heurlb, sgmax):
-        self.iters[it] = (fx, self.fxc, self.nbsteps['serious'], self.lb, heurlb, sgmax, self.time())
-        logger.debug(f"It {it}({self.nbsteps['serious']}): fxc={self.fxc:.5f} "
-                    f"lb={self.lb:.5f} heurlb={heurlb:.5f} |sgmax|={sgmax:.5f} time={self.time():0.2f}")
-
-    def solve(self, x0):
-        """ Subgradient algorithm: minimizes a convex function f(x), x free.
-
-        Runs the subgradient algorithm starting from point x and
-        returns a minimizer of the convex function oracle(x) within given tolerance and iteration number limit.
-
-        Args:
-        x0: the starting point
-
-        Returns:
-            x: the best minimizer found.
-        """
-        self.init_solve()
-        self.xc = x0
-        x = x0
-        heurlb = - GRB.INFINITY
-        update_agility = 0
-        for k in range(self.MAX_ITER):
-            fx, gx, sx = self.oracle(x)
-            sgmax = max(abs(s) for s in gx)
-            logger.info(f"it {k}: f = {fx:.5f}, |sg|={sgmax:.5f},  time={self.time():0.2f}")
-
-            if self.fxc > fx:
-                self.nbsteps["serious"] += 1
-                self.xc = x
-                self.fxc = fx
-                logger.info(f"it {k}({self.nbsteps['serious']}): fxc = {self.fxc:.5f}, f = {fx:.5f}, "
-                             f"|sg|={sgmax:.5f},  time={self.time():0.2f}")
-            if self.primal():
-                heurlb = self.solve_primal(self.xc)
-                logger.debug(f"heurlb {heurlb}")
-                if self.lb < heurlb:
-                    self.lb = heurlb
-                    logger.info(f"new lb {self.lb}")
-            if self.fxc - self.lb < self.TOL:
-                break
-            # @todo add a stopping condition if the method oscillates for long time
-
-            norm = sum(sg * sg for sg in gx)
-            for i, sg in enumerate(gx):
-                x[i] -= sg * self.AGILITY_MAX * (self.fxc - self.lb) / norm
-                if self.oracle_obj.positive_quadrant and x[i] <= 0:
-                    x[i] = 0
-
-        self.set_final_solution()
-        return self.final_solution
