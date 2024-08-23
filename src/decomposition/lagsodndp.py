@@ -9,13 +9,13 @@ Created on Mon Jul 24 17:28:06 2024
 import logging
 from pathlib import Path
 import gurobipy as gp
+from gurobipy import GRB
 
 from src.cvxsolver.blocksolver import BlockOracle
 from src.cvxsolver.cvxsolver import CvxSolver, Oracle
 from src.cvxsolver.subgradient import SubGradient
 from src.cvxsolver.proximalbundle import ProximalBundle
 from src.cvxsolver.admm import Admm
-from gurobipy import GRB
 from src.tapas import Network
 
 INDIR = "../../data/"
