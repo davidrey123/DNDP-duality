@@ -92,7 +92,7 @@ class GBModel:
         then generate the OA cuts: c_a >= X_a.t(X_a) + [t(X_a) + x_a.dt(X_a)].(x_a - X_a) for X_a > 0
         and add them as constraints to the model
         """
-        tstt = self.net.msa('UE', ysol, self.allclose)  # @todo is it 'SO' or 'UE' ???
+        tstt = self.net.tapas('UE', ysol)  # @todo is it 'SO' or 'UE' ???
         logging.debug(f"TAP: UE={tstt}")
         # oacut = {a: GBModel.get_SOcut_poly(a, a.x) for a in self.net.links if a.y == 1}
         oacut = {}
@@ -223,8 +223,10 @@ class GBModel:
     def simulate_n_checkNLP(self, ysol: dict, yname: str):
         print(f"-- simulate solution {yname}")
         stime = time.time()
-        tstt = self.net.msa('UE', ysol, self.allclose)  # @todo is it 'UE' ?
+        self.net.resetTapas()
+        tstt = self.net.tapas('UE', ysol)
         xsol = {a: a.x for a in self.net.links}
+        print(f"TAPAS: {xsol}")
         runtime = time.time() - stime
         print(f"solution cost= {tstt}  runtime={runtime:.2f}")
 
@@ -300,6 +302,11 @@ if __name__ == "__main__":
     oadsol = modelOAD.getSolution()
     oadtstt, oadnlpcost = model.simulate_n_checkNLP(oadsol, "yOAD")
     oadflow = modelOAD.getSolution('x')
+    nlpflow = model.getSolution('x')
+    print(f"oad: {oadflow}")
+    print(f"nlp: {nlpflow}")
+    print("diff:")
+    print({a: abs(oadflow[a] - nlpflow[a]) for a in oadflow})
 
     print(f"-- check full solution (yOAD, xOAD) in NLP")
     modelNLP = GBModel(ntk)

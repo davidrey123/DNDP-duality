@@ -1,4 +1,4 @@
-# DNDP-duality
+# SO-DNDP-duality
 
 ## Usage for solving the Lagrangian dual:
 1. define the Lagrangian dual function (or its opposite) as a convex function **f(x)** by implementing *Oracle* and the main function *oracle(x)*
@@ -24,3 +24,17 @@ In turn, it can be embedded in any CvxSolver
 Convergence is guaranteed if **c** and **g** are convex
 5. *BlockDNDPOracle* in *lagsodndp.py* provides an implementation of BlockOracle for the augmented lagrangian relaxation of SO-DNDP when dualizing the bilinear complementary constraint.
 As it is not convex, we have no convergence guarantee, still it can provides primal feasible solution at the end
+
+## Usage for solving the MINLP
+
+In *gbmodel.py*, *GBModel(network)* implements the math program
+for SO-DNDP for different modelisations of the cost objective, given:
+
+**obj = sum_a c_a** with **c_a=c(x_a)=x_a.t(x_a)**
+
+In *model.solve(otype)*, select *otype=*:
+
+- **"nl"**: use the nonconvex solver of gurobi !!! because there is no API for defining define **c_a >= c(x_a)**
+- **"pwl"**: approx by using the default piecewise linearization by gurobi for **c_a=c(x_a)**
+- **"oa"**: relax by using a fixed number of OA cuts **c_a >= c(X) + c'(X)(x_a-X)**
+- **"oad"**: generate the OA cuts dynamically within the B&B
