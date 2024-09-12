@@ -21,33 +21,36 @@ ytemp = {(7, 16): 0, (16, 7): 0, (19, 22): 1, (22, 19): 1, (11, 15): 1, (15, 11)
 y = {}
 lbd = {}
 for a in network.links2:
-    y[a] = ytemp[(a.start.id,a.end.id)]
+    y[a] = ytemp[(a.start.id, a.end.id)]
     # y[a] = 1
     lbd[a] = 0
 
 print(y)
 
 #---'L' mode solves penalized SO-TAP based on y and lbd
-tstt = network.msa('L',y,lbd)
-print('TSTT', tstt)
+tstt = network.msa('UEL',y,lbd)
+print(f"MSA L{max(lbd.values())} TSTT={tstt} cost={network.getCost('UEL')}")
 
 # model = GBModel(network)
 # model.solveOA(y)
 
 
 #---solve SO-TAP based on y (will ignore lbd)
-tstt = network.msa('SO',y,lbd)
-print('SO TSTT',tstt)
+tstt = network.msa('SO', y, lbd)
+print(f"MSA SO TSTT={tstt}  cost={network.getCost('SO')}")
 
 #---solve UE-TAP based on y (will ignore lbd)
-tstt = network.msa('UE',y,lbd)
-print('UE TSTT',tstt)
+tstt = network.msa('UE', y, lbd)
+print(f"MSA UE TSTT={tstt}  cost={network.getCost('UE')}")
 print({a: a.x for a in network.links})
 
 tstt = network.tapas('UE',y)
-print('TAPAS UE TSTT',tstt)
+print(f"TAPAS UE TSTT={tstt} cost={network.getCost('UE')}")
 print({a: a.x for a in network.links})
 
+tstt = network.tapas('SO',y)
+print(f"TAPAS SO TSTT={tstt} cost={network.getCost('SO')}")
+print({a: a.x for a in network.links})
 
 #---solve DNDP using Leblanc's BB algorithm
 leblanc = Leblanc.Leblanc(network)

@@ -38,7 +38,7 @@ class ProximalBundle(CvxSolver):
     PRIMAL = True
 
     def __init__(self, oracle: Oracle):
-        CvxSolver.__init__(self, oracle)
+        CvxSolver.__init__(self, oracle, "PB")
         self.prox = self.PROX_INIT
         self.bundle = None
         self.nbsteps = None
@@ -81,11 +81,11 @@ class ProximalBundle(CvxSolver):
             x: the last stability center found.
         """
         self.init_solve()
-        lb = - GRB.INFINITY
+        heurlb = - GRB.INFINITY
 
         self.xc = list(x0)
         self.fxc, gxc, sxc = self.oracle(self.xc)
-        logger.info(f"init: {self.fxc}")
+        logger.info(f"bdle init val: {self.fxc}")
         self.bundle = [[gxc, 0, sxc]]
         for it in range(self.MAX_ITER):
 
@@ -122,7 +122,8 @@ class ProximalBundle(CvxSolver):
                 errx = self.fxc - fx + sum(gx[i] * (xi - self.xc[i]) for i, xi in enumerate(x))
                 self.update_null(proxtmp)
 
-            self.store_iteration(serious, it, fx, normsgagg, [self.lb, heurlb, self.prox, erragg])
+            vals = [self.lb, heurlb, self.prox, erragg] if heurlb else [self.prox, erragg]
+            self.store_iteration(serious, it, fx, normsgagg, vals)
 
             # UPDATE BUNDLE
             if len(self.bundle) < self.BDL_SZ_MAX:
@@ -134,7 +135,7 @@ class ProximalBundle(CvxSolver):
                 solagg = self.aggregate_primal_solution(mu)
                 self.compress_bundle([gx, errx, sx], [sgagg, erragg, solagg], mu)
 
-        logger.info(f"STOP:  iteration = {self.MAX_ITER}")
+        logger.info(f"bdle STOP:  iteration = {self.MAX_ITER}")
         self.set_final_solution()
         return self.final_solution
 
@@ -142,12 +143,12 @@ class ProximalBundle(CvxSolver):
         # SOLVE QP MODEL FOR DIRECTION
         x, mu, decr_predict, proximity, sgagg, erragg = self.solve_QP_primal() if self.PRIMAL else self.solve_QP_dual()
         normsgagg = max(abs(s) for s in sgagg)
-        logger.debug(f"direction: {decr_predict:.5f} {proximity:.5f}")  # , x
+        logger.debug(f"direction: decr={decr_predict:.5f} prox={proximity:.5f}")  # , x
 
         # STOPPING TEST alternative: if (erragg + sgagg.xc <= tol) and (normsgagg <= 1000 * tol)
         ff = 1 + abs(self.fxc)
         if (erragg <= self.TOL * ff) and (normsgagg <= self.TOL * ff):
-            logger.info(f"STOP: erragg: {erragg}, |sgagg|: {normsgagg}")
+            logger.info(f"bdle STOP: erragg: {erragg}, |sgagg|: {normsgagg}")
             aggregate_sol = self.aggregate_primal_solution(mu)
             self.set_final_solution()
         # noise attenuation [Kiwiel06]; decuple t if erragg is overly negative and solve again
@@ -193,10 +194,12 @@ class ProximalBundle(CvxSolver):
                                   - self.bundle[k][1] for k in range(bdlsz))
 
         model.optimize()
+        # model.write("zeqp.lp")
         if model.Status != GRB.OPTIMAL:
             logger.warning('Deu merda ! -- Wlo')
 
         x = [self.xc[i] + d[i].x for i in range(dim)]
+        # print(f"decr_predict={-y.x}, new trial point: {x}")
         sgagg = [-d[i].x / self.prox for i in range(dim)]
         decr_predict = -y.x
         decr_nominal = - obj.getValue()

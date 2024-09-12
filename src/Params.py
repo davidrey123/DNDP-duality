@@ -27,11 +27,10 @@ class Params:
 
         self.printBushEquilibrate = False
         self.printReducedCosts = False
-        
-        
-        self.tapas_max_iter = 100
+
+        self.tapas_max_iter = 5000
         self.min_gap = 1E-3
-        self.msa_max_iter = 1000
+        self.msa_max_iter = 5000
     
         self.warmstart = False
         

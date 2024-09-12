@@ -7,6 +7,7 @@ Created on Mon Jul 24 17:28:06 2024
 """
 
 import logging
+import random
 from pathlib import Path
 import gurobipy as gp
 from gurobipy import GRB
@@ -16,20 +17,14 @@ from src.cvxsolver.cvxsolver import CvxSolver, Oracle
 from src.cvxsolver.subgradient import SubGradient
 from src.cvxsolver.proximalbundle import ProximalBundle
 from src.cvxsolver.admm import Admm
+from src.decomposition.gbmodel import GBModel
 from src.tapas import Network
 
 INDIR = "../../data/"
 OUTDIR = "../../output/"
 
-logging.basicConfig(
-    handlers=[
-        logging.FileHandler(Path(OUTDIR, "lag.log")),
-        logging.StreamHandler()
-    ],
-    # format="%(levelname)s: %(message)s")
-    # format="%(name)s - %(asctime)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-    )
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class DNDP:
@@ -45,16 +40,19 @@ class DNDP:
         self.allclosed = {a: 0 for a in self.network.links2}
         self.link_idx = {a: i for (i, a) in enumerate(self.network.links2)}
         self.last_knap_sol = {a: 0 for a in self.network.links2}
+        self.last_knap_val = None
+        self.changed_knap_sol = True
+        self.allopen_tap = None
 
     @staticmethod
     def build_knap_model(network: Network):
-        m = gp.Model('knap')
-        m.Params.OutputFlag = 0
-        m.ModelSense = GRB.MAXIMIZE
-        yvar = m.addVars(network.links2, obj=1, vtype=GRB.BINARY, name="y")
-        m.addConstr(sum(yvar[a] * a.cost for a in network.links2) <= network.B, name="B")
-        m.update()
-        return m
+        ksm = gp.Model('knap')
+        ksm.Params.OutputFlag = 0
+        ksm.ModelSense = GRB.MAXIMIZE
+        yvar = ksm.addVars(network.links2, obj=1, vtype=GRB.BINARY, name="y")
+        ksm.addConstr(sum(yvar[a] * a.cost for a in network.links2) <= network.B, name="B")
+        ksm.update()
+        return ksm
 
     def udict(self, u: list):
         return {a: u[i] for (i, a) in enumerate(self.network.links2)}
@@ -73,8 +71,20 @@ class DNDP:
         self.knap_model.optimize()
         assert self.knap_model.Status == GRB.OPTIMAL, f"knapsack status={self.knap_model.Status}"
         ly = self.knap_model.objVal
-        self.last_knap_sol = {a: int(self.knap_vars[i].x) for (i, a) in enumerate(self.network.links2)}
+        self.changed_knap_sol = self.update_last_knap_sol()
+        if self.changed_knap_sol:
+            self.last_knap_val = None
         return ly, self.last_knap_sol
+
+    def update_last_knap_sol(self):
+        change = 0
+        for (i, a) in enumerate(self.network.links2):
+            if self.last_knap_sol[a] != int(self.knap_vars[i].x):
+                change += 1
+                self.last_knap_sol[a] = int(self.knap_vars[i].x)
+        if change:
+            logger.debug(f"new knap sol {change}: {self.last_knap_sol}")
+        return change > 0
 
     def solveTAP(self, costtype: str, y: dict, u: dict):
         """
@@ -82,16 +92,23 @@ class DNDP:
         f(y) = min_{x} x.(t(x) + u[0] + u[1]*x): TAP(x), y=0 => x=0
 
         Returns:
-            tstt (float): the 'UE' flow cost
+            tstt (float): the 'SO' flow cost sum x.t(x)
             f(y) (float): the 'costtype' flow cost
             sx (dict): the optimal flow solution
         """
-
         tstt = self.network.msa(costtype, y, u)
-        lx = self.network.getTSTT(costtype)
+        lx = self.network.getCost(costtype)
         x = {a: a.x for a in self.network.links2}
-        logging.debug(f"TAP: UE={tstt}, {costtype}={lx}")
+        logger.debug(f"TAP: SO={tstt}, {costtype}={lx}")
         return tstt, lx, x
+
+    def allopen_TAP(self):
+        if not self.allopen_tap:
+            tstt, lx, x = self.solveTAP("SO", self.allopen, self.allclosed)
+            assert abs(tstt - lx) < 1e-5
+            logger.debug(f"allopensol = {tstt} flow = {x}")
+            self.allopen_tap = (tstt, x)
+        return self.allopen_tap
 
     def eval_last_knap_sol(self):
         """
@@ -103,11 +120,17 @@ class DNDP:
             -f(y) (float): a valid lower bound of the lagrangian dual -l*
             y (list): the feasible configuration
         """
+        if self.last_knap_val:
+            return self.last_knap_val, self.last_knap_sol
 
-        tstt, lx, sx = self.solveTAP('UE', self.last_knap_sol, self.allclosed)
-        assert tstt == lx
-        logging.debug(f"heuristic={lx} integer solution {self.last_knap_sol}")
+        tstt, lx, sx = self.solveTAP('SO', self.last_knap_sol, self.allclosed)
+        self.last_knap_val = -tstt
+        assert abs(tstt - lx) < 1e-5
+        logger.info(f"heuristic={lx} integer solution {self.last_knap_sol}")
         return -tstt, self.last_knap_sol
+
+    def randomy(self) -> dict:
+        return {a: random.randint(0, 1) for a in self.network.links2}
 
 
 class DNDPOracle(Oracle):
@@ -134,7 +157,7 @@ class DNDPOracle(Oracle):
                y: (list) integer solution y of ly(u)
         """
         udict = self.dndp.udict(u)
-        logging.debug(f"candidate {udict}")
+        logger.debug(f"candidate {udict}")
 
         tstt, lx, sx = self.dndp.solveTAP("UEL", self.dndp.allopen, udict)
         ly, sy = self.dndp.solveKS(u)
@@ -152,12 +175,114 @@ class DNDPOracle(Oracle):
         return self.dndp.eval_last_knap_sol()
 
 
+class DNDPGBOracle(Oracle):
+    """Concrete approximate oracle for min_{u,r>=0} -l(u,r) the opposite augmented lagrangian dual function
+    l(y,x,u,r)=min_{y,x: TAP(x), g.y <= B} x.t'(x,y) with t'_a(x_a,y_a) = t_a(x_a) + (1-y_a)*(u_a + r/2.(1-y_a)x_a)
+    an approximate solution is computed in 2 steps:
+    1/ (y,x0) is obtained from the PWL approximation of gurobi
+    2/ x is obtained from TAP(y)
+    -l is convex and a subgradient at (u,r) is (x(1-y), |x(1-y)|^2/2) where (x,y) solves l(u,r)
+    """
+
+    def __init__(self, id_: str, network: Network):
+        Oracle.__init__(self, id_, positive_quadrant=True)
+        self.dndp = DNDP(id_, network)
+        gbm = GBModel(network)
+        gbm.minlp.remove(gbm.mctrs)
+        gbm.minlp.setParam(GRB.Param.OutputFlag, False)
+        gbm.minlp.setParam(GRB.Param.FuncNonlinear, 0)
+        self.gbmodel = gbm
+        self.clvar = DNDPGBOracle.addObjective(network, gbm.minlp, gbm.xvar, gbm.yvar, gbm.cvar)
+        self.clctrs = None
+
+    @staticmethod
+    def addObjective(network, minlp, xvar, yvar, cvar):
+        """ c_a = x_a.t_a(x_a) + (1-y_a) * cl_a
+        gurobi does not allow yet to add the convex polynomial constraint c >= x.t(x)...
+        thus we add the nonconvex constraint c == x.t(x) instead """
+        c0var = minlp.addVars(network.links, vtype=GRB.CONTINUOUS, lb=0.0, name="c0")
+        for a in network.links:
+            minlp.addGenConstrPoly(xvar[a], c0var[a], GBModel.get_SO_poly_reverse(a), name=f"C0[{a}]")
+            minlp.addConstr(cvar[a] >= c0var[a], name=f"CC[{a}]")
+
+        clvar = minlp.addVars(network.links2, vtype=GRB.CONTINUOUS, lb=0.0, name="cl")
+        for a in network.links2:
+            minlp.addGenConstrIndicator(yvar[a], 0.0, cvar[a] >= c0var[a] + clvar[a])
+        return clvar
+
+    def updateObjective(self, u: list, r: float):
+        """ cl_a = u_a.x_a + r/2.x_a^2 """
+        self.gbmodel.minlp.update()
+        if self.clctrs:
+            self.gbmodel.minlp.remove(self.clctrs)
+        self.clctrs = self.gbmodel.minlp.addConstrs(self.clvar[a] >= self.gbmodel.xvar[a] * u[i] +
+                                                    self.gbmodel.xvar[a] * self.gbmodel.xvar[a] * r/2
+                                                    for i, a in enumerate(self.clvar))
+
+    def solveAugLagModel(self, u: list, r: float):
+        self.updateObjective(u, r)
+        gbm = self.gbmodel.minlp
+        gbm.optimize()
+
+        if gbm.status == GRB.INFEASIBLE:
+            iisfilename = "oracle.iis"
+            logger.warning(f'no solution found write IIS file {iisfilename}')
+            gbm.computeIIS()
+            gbm.write(iisfilename)
+
+        assert gbm.status == GRB.OPTIMAL, f"Optimization was stopped with status {gbm.status}"
+
+        cost = gbm.objval
+        bctr = gbm.getConstrByName("B")
+        runtime = gbm.runtime
+        logger.debug(f"oracle: cost={cost} slack={bctr.Slack} ({bctr.RHS}) runtime={runtime:.2f}")
+
+        return self.gbmodel.getSolution()
+
+    def oracle(self, v: list):
+        """ get the zero and first information of -l at point v=(u,r)
+        """
+        logger.info(f"candidate {v}")
+        u = v[:-1]
+        r = v[-1:][0]
+        y = self.solveAugLagModel(u, r)
+        self.update_last_knap_sol(y)
+
+        logger.debug(f"-- get auglag-TAP solution for {y}")
+        lbd = {a: (u[i] * (1 - y[a]), r * (1 - y[a]) / 2) for (i, a) in enumerate(y)}
+        tstt, lx, x = self.dndp.solveTAP('AUEL', self.dndp.allopen, lbd)
+        assert abs(tstt - self.dndp.network.getCost('SO')) < 1e-5
+        logger.debug(f"lx={lx} x={x}")
+
+        sg = [0 if y[a] == 1 else -x[a] for a in y]
+        sgr = sum(v * v for v in sg) / 2
+        sg.append(-sgr)
+
+        return -lx, sg, y
+
+    def has_lb(self):
+        return True
+
+    def eval_lb(self):
+        return self.dndp.eval_last_knap_sol()
+
+    def update_last_knap_sol(self, y: dict):
+        change = 0
+        for (a, ya) in y.items():
+            if self.dndp.last_knap_sol[a] != y[a]:
+                change += 1
+            self.dndp.last_knap_sol[a] = y[a]
+        if change:
+            logger.debug(f"new knap sol {change}: {self.dndp.last_knap_sol}")
+        self.dndp.changed_knap_sol = (change > 0)
+
+
 class BlockDNDPOracle(BlockOracle):
     """Concrete oracle for min_{u,r>=0} -l(u,r) the opposite augmented lagrangian dual function
     obtained by dualizing the complementary equality x.(1-y) = 0 in SO-DNDP
     min_{x,y} f(x)= sum_a x_a.t_a(x_a): TAP(x), g.y <= B, y=0 => x=0
     we enforce the separation of the lagrangian function in two blocks:
-    lx(u,y,r)=min_{x: TAP(x)} x.t(x,y) with t'_a(x_a,y_a) = t_a(x_a) + (1-y_a)*(u_a + r/2.(1-y_a)x_a
+    lx(u,y,r)=min_{x: TAP(x)} x.t'(x,y) with t'_a(x_a,y_a) = t_a(x_a) + (1-y_a)*(u_a + r/2.(1-y_a)x_a)
     ly(u,x,r)= min_{y: g.y <= B} sum_a (1-y_a).x_a.(u_a + r/2.x_a)
     -l is convex and a subgradient at (u,r) is (x(1-y), |x(1-y)|^2/2) where (x,y) solves l(u,r)
     although we do not solve l(u,r) exactly but approximately by iterating over y=lx(y) and x=ly(x)
@@ -172,28 +297,37 @@ class BlockDNDPOracle(BlockOracle):
     def oracle_block_1(self, u: list, y: dict, r: float):
         """ solve the partial augmented lagrangian (flow solution) for the complementary formulation x(1-y)=0:
         solve the perturbed TAP: min_{x: TAP(x)} L(x,y,u,r) for fixed multiplier u, config y, penalty r
-        with L(x,y,u,r) = x.t(x) + u.x.(1-y) + r/2|x.(1-y)|^2 : TAP(x), g.y <= B
+        with L(x,y,u,r) = x.t(x) + u.x.(1-y) + r/2|x.(1-y)|^2
 
          Args:
              u: (list) multipliers
-             y: (list) configuration
+             y: (dict) configuration
              r: (float) penalty
 
          Returns:
                -L(x*,y,u,r): (float) the optimal pertubed TAP value with objective x(t(x)+(1-y)(l+x.r/2))
                x*: (list) the optimal perturbed TAP solution
         """
-        logging.debug(f"y={y}")
         # SODNDP:  augmented lagrangian x(t(x) + (1-y).l + x.(1-y).r/2))
+        logger.debug(f"B1 y={y} u={u} ,r={r}")
+
+        if y == self.dndp.allopen:
+            tstt, sx = self.dndp.allopen_TAP()
+            self.last_flowcost = tstt
+            return -tstt, sx
+
         lbd = {a: (u[i] * (1 - y[a]), r * (1 - y[a]) / 2) for (i, a) in enumerate(y)}
         tstt, lx, sx = self.dndp.solveTAP('AUEL', self.dndp.allopen, lbd)
-        self.last_flowcost = self.dndp.network.getTSTT("UE")
+        assert abs(tstt - self.dndp.network.getCost('SO')) < 1e-5
+        self.last_flowcost = tstt
+        logger.debug(f"B1 lx={lx} x={sx}")
+        # self.z1_init = sx
         return -lx, sx
 
     def oracle_block_2(self, u: list, x: dict, r: float):
         """ solve the partial augmented lagrangian (config solution) for the complementary formulation x(1-y)=0:
         solve the knapsack problem: min_{y: g.y <= B} L(x,y,u,r) for fixed multiplier u, flow x, penalty r
-        with L(x,y,u,r) = x.t(x) + u.x.(1-y) + r/2|x.(1-y)|^2 : TAP(x), g.y <= B
+        with L(x,y,u,r) = x.t(x) + u.x.(1-y) + r/2|x.(1-y)|^2
 
          Args:
              u: (list) multipliers
@@ -205,38 +339,32 @@ class BlockDNDPOracle(BlockOracle):
                y*: (list) the optimal knapsack solution
         """
         cost = [x[a] * (u[i] + x[a] * r/2) for (i, a) in enumerate(x)]
+        logger.debug(f"B2: knapcost={cost} x={x} u={u} r={r}")
         total_cost = sum(cost)
 
-        logging.debug(f"x={x}")
         ksopt, kssol = self.dndp.solveKS(cost)
         ly = self.last_flowcost + total_cost - ksopt
-        logging.debug(f"ly={ly}")
+        logger.debug(f"B2: ly={ly} pen={total_cost - ksopt} y={kssol}")
+        if self.has_changed() and self.has_lb():
+            self.dndp.eval_last_knap_sol()
+        # self.z2_init = kssol
+        # self.z2_init = self.dndp.allclosed
         return -ly, kssol
 
-    def update_admm(self, u: list, x: dict, y: dict, r: float):
-        """ update multipliers according to the ADMM policy when dualizing he complementary formulation x(1-y)=0:
-        u += r.x*.(1-y*) with x* and y* the partial solutions of L(x,y,u,r) for fixed multiplier u, penalty r
-        and L(x,y,u,r) = x.t(x) + u.x.(1-y) + r/2|x.(1-y)|^2 : TAP(x), g.y <= B
-        Note that there is a priori no proof of convergence as the dualized constraint is not linear.
+    def has_changed(self):
+        return self.dndp.changed_knap_sol
 
-         Args:
-             u: (list) multipliers
-             x: (list) TAP flow partial solution
-             y: (list) config partial solution
-             r: (float) penalty
+    def init_partial_sols(self):
+        self.dndp.last_knap_sol = self.z2_init.copy()
+        self.dndp.changed_knap_sol = True
+        return None, self.z2_init
 
-         Returns:
-               v: (list) updated multipliers
-               d: (float) maximal deviation max_a x_a(1-y_a)
-        """
-        v = [u[i] if y[a] == 1 else u[i] + r * x[a] for (i, a) in enumerate(y)]
-        norminf = max(x[a]*(1-y[a]) for a in y)
-        logging.info(f"deviation Linf = {norminf}")
-        return v, norminf
-
-    def violation(self, x: dict, y: dict):
-        """ returns the vector x.(1-y)"""
-        return [0 if y[a] == 1 else x[a] for a in y]
+    def subgradient(self, x: dict, y: dict):
+        """ returns the vector x.(y-1)"""
+        h = [0 if y[a] == 1 else -x[a] for a in y]
+        self.z2_init = {a: 0 if ya == 1 else 1 for a, ya in y.items()}
+        dev = abs(min(h))
+        return h, dev
 
     def has_lb(self):
         return True
@@ -261,7 +389,7 @@ class Lagrangian:
         if instancename.startswith('SF'):
             net = 'SiouxFalls'
             datadir = Lagrangian.DATADIR + net + "/"
-        logging.info(f"{net} {instancename}")
+        logger.info(f"{net} {instancename}")
         assert net, f"no instance {instancename}"
         return Network.Network(datadir, instancename, 0.5, 1e-0, 1e-3)
 
@@ -269,49 +397,63 @@ class Lagrangian:
     # initial network configuration for BlockOracle
     def init_partial_primal_solution(ntk):
         # yinit_list = [0, 0, 1, 1, 1, 1, 0, 0, 0, 1]
+        # yinit_list = [1,1,1,1,0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0,0, 1,1,0,0]
         yinit_list = [0 for _ in ntk.links2]
-        logging.info(f"primal partial solution {yinit_list}")
+        logger.info(f"primal partial solution {yinit_list}")
         return {a: yinit_list[i] for (i, a) in enumerate(ntk.links2)}
 
     @staticmethod
     # initial dual point
     def init_dual_solution(ntk, mode: str):
-        uinit = [0 for _ in ntk.links2]
-        if mode == 'AB':
-            uinit.append(0)
-        logging.info(f"dual solution {uinit}")
+        uinit = [0.0 for _ in ntk.links2]
+        if mode.startswith('AB'):
+            uinit.append(1)
+        logger.info(f"dual solution {uinit}")
         return uinit
 
     @staticmethod
     def buildsolver(ins: str, ntk: Network, mode='B') -> CvxSolver:
-        solver = ProximalBundle(DNDPOracle(ins, ntk))
+        solver = None
+        if mode == 'B':
+            solver = ProximalBundle(DNDPOracle(ins, ntk))
         if mode == 'S':
             solver = SubGradient(DNDPOracle(ins, ntk), lb_init=-8000)
         elif mode == 'A':
             yinit = Lagrangian.init_partial_primal_solution(ntk)
-            solver = Admm(BlockDNDPOracle(ins, ntk, yinit), penalty=1000)
+            solver = Admm(BlockDNDPOracle(ins, ntk, yinit), penalty=1)
         elif mode == 'AB':
             yinit = Lagrangian.init_partial_primal_solution(ntk)
             solver = ProximalBundle(BlockDNDPOracle(ins, ntk, yinit))
+        elif mode == 'ABG':
+            solver = ProximalBundle(DNDPGBOracle(ins, ntk))
         return solver
 
     def solve(self, plot=True):
         """Solve the convex problem [min_{u>=0} -L(u)] starting from uinit. """
         fu, u = self.solver.solve(self.uinit)
-        logging.info(f"best dual cost {-fu}")
-        logging.info(f"best dual solution {u}")
+        logger.info(f"best dual cost {-fu}")
+        logger.info(f"best dual solution {u}")
         if plot:
             self.solver.show_iters()
         lb, lbsol = self.solver.get_relaxed_solution()
         if lbsol:
-            logging.info(f"best primal cost {-lb}")
-            logging.info(f"best primal solution {lbsol}")
+            logger.info(f"best primal cost {-lb}")
+            logger.info(f"best primal solution {lbsol}")
 
 
 if __name__ == "__main__":
 
-    instance = 'SF_DNDP_20_1'
+    modes = {'S': "lag subgradient", 'B': "lag bundle",
+             'A': "auglag admm (inexact dual)", 'AB': "auglag GS1 bdle (inexact dual)",
+             'ABG': "auglag GBPWL bdle (inexact dual)"}
 
-    modes = {'S': "lag subgradient", 'B': "lag bundle", 'A': "auglag admm", 'AB': "auglag bdle"}
-    lagsolver = Lagrangian(instance, mode='B')
+    instance = 'SF_DNDP_20_1'
+    m = 'ABG'
+
+    logger.info(f"Solver = {modes[m]}")
+    lagsolver = Lagrangian(instance, m)
     lagsolver.solve()
+
+    # 'AB': blockoracle gives a very bad estimate as the block iterations stop after the first KS computed solution
+    # 'ABG': oracle based on solving the PWL approximate model - the dual bound is still inexact but works well
+    # @todo oracle based on solving the OA-epsilon relaxed model: if OA feas-tol = OA opt-tol then = lag dual opt-tol

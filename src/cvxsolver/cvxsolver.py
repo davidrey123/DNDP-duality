@@ -16,7 +16,7 @@ import time
 import logging
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 class Oracle:
@@ -77,8 +77,9 @@ class CvxSolver:
     MAX_ITER = 200
     TOL = 1e-7
 
-    def __init__(self, oracle: Oracle):
+    def __init__(self, oracle: Oracle, name: str):
         self.oracle_obj = oracle
+        self.name = name
         self.xc = None
         self.fxc = 1e12
         self.final_solution = None
@@ -113,15 +114,12 @@ class CvxSolver:
         self.iters_label = ('serious', 'fx', 'fxc', '|sg|', 'time') + vals_label
         self.axes = [-1, 0, 0, 1, -1]
         nexta = 2
-        nextl = 0
-        if len(vals_label) > 2 and vals_label[0] == 'lb' and vals_label[1] == 'heurlb':
-            self.axes.extend([0, 0])
-            #self.axes.extend([nexta, nexta])
-            #nexta += 1
-            nextl = 2
-        for i in range(nextl, len(vals_label)):
-            self.axes.append(nexta)
-            nexta += 1
+        for v in vals_label:
+            if v == 'lb' or v == 'heurlb':
+                self.axes.append(0)
+            else:
+                self.axes.append(nexta)
+                nexta += 1
 
     def store_iteration(self, serious: bool, it: int, fx: float, normsg: float, vals: list):
         self.iters[it] = [self.nbsteps['serious'], fx, self.fxc, normsg, self.time()] + vals
@@ -129,17 +127,19 @@ class CvxSolver:
         for i in range(1, len(self.iters[it])):
             valstr += f"{self.iters_label[i]}={self.iters[it][i]:.5f} "
         logger.debug(valstr)
-        if serious:
-            logger.info(valstr)
+        # if serious:
+        logger.info(valstr)
 
     def show_iters(self):
         its, bounds = zip(*(sorted(self.iters.items())))
         vals = list(zip(*bounds))
-        dim = self.axes[-1]
+        dim = max(self.axes)
         fig, axes = plt.subplots(nrows=1, ncols=dim+1, figsize=(20, 3))
+        date = time.strftime("%y-%m-%d-%H:%M", time.gmtime())
+        fig.suptitle(f"{self.oracle_obj.id} {self.name} {date} - cpu={self.time():.1f} it={max(its)+1}", fontsize=10)
         #cmap = plt.get_cmap('gnuplot')
         #colors = cmap(range(len(self.axes)))
-        colors = "rgbcmyrgbcmy"
+        colors = "rgbcmyrgbcmyrgbcmy"
         for (i, a) in enumerate(self.axes):
             if a >= 0:
                 axes[a].plot(its, vals[i], color=colors[i], label=self.iters_label[i])
@@ -148,6 +148,8 @@ class CvxSolver:
         plt.savefig('iterations.png')
 
     def update_lb(self):
+        if not self.oracle_obj.has_lb():
+            return None
         relaxed_val, relaxed_sol = self.oracle_obj.eval_lb()
         if relaxed_sol:
             logger.debug(f"relaxation: {relaxed_val}")
@@ -158,3 +160,4 @@ class CvxSolver:
 
     def get_relaxed_solution(self):
         return self.lb, self.lbsol
+

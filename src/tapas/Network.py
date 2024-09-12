@@ -279,7 +279,10 @@ class Network:
                 output += a.x * tt
                 
         return output
-    
+
+    def getCost(self, type):
+        return sum(a.getCost(a.x, type) for a in self.links)
+
     def validateLinkFlows(self):
         output = True
         for ij in self.links:
@@ -379,12 +382,12 @@ class Network:
         self.setY(y)
         self.setType(type)        
         
-        max_iteration = self.params.tapas_max_iter
+        max_iteration = self.params.msa_max_iter
         min_gap = self.params.min_gap
 
         for a in self.links2:
             if type == 'AUEL':
-                assert y[a] == 1 and len(lbd[a]) == 2
+                assert y[a] == 1 and len(lbd[a]) == 2, f"AUEL but {a}: {y[a]} != 1 or {len(lbd[a])} != 2"
                 a.setlbdCost(lbd[a][0])
                 a.setlbdCost2(lbd[a][1])
             else:
@@ -408,8 +411,9 @@ class Network:
                 print(str(iteration)+"\t"+str(tstt)+"\t"+str(sptt)+"\t"+str(gap)+"\t"+str(aec))
                 
             if gap < min_gap:
+                print(f"msa: min gap {min_gap} reached at it={iteration}")
                 break
-        
+
         return self.getTSTT('UE')
 
     def resetTapas(self):
@@ -517,11 +521,11 @@ class Network:
                 #printLinkFlows();
                 
             if gap < min_gap:
+                print(f"tapas: min gap {min_gap} reached at it={iter}")
                 break
-                
-                
-            # there's an issue where PAS are labeled as not cost effective because the difference in cost is small, less than 5% of the reduced cost
-            # for low network gaps, this is causing PAS to not flow shift
+
+            # there's an issue where PAS are labeled as not cost effective because the difference in cost is small,
+            # less than 5% of the reduced cost for low network gaps, this is causing PAS to not flow shift
             # when the gap is low, increase the flow shift sensitivity
             if (last_iter_gap - gap) / gap < 0.01:
                 

@@ -34,7 +34,7 @@ class GBModel:
     def __init__(self, network: Network):
         self.net = network
         self.allclose = {a: 0 for a in network.links2}
-        self.minlp, self.yvar, self.xvar, self.cvar = GBModel.build_model(network)
+        self.minlp, self.yvar, self.xvar, self.cvar, self.mctrs = GBModel.build_model(network)
         self.costmodel = None
 
     @staticmethod
@@ -92,8 +92,8 @@ class GBModel:
         then generate the OA cuts: c_a >= X_a.t(X_a) + [t(X_a) + x_a.dt(X_a)].(x_a - X_a) for X_a > 0
         and add them as constraints to the model
         """
-        tstt = self.net.tapas('UE', ysol)  # @todo is it 'SO' or 'UE' ???
-        logging.debug(f"TAP: UE={tstt}")
+        tstt = self.net.msa('SO', ysol, self.allclose)
+        logging.debug(f"TAP: SO={tstt}")
         # oacut = {a: GBModel.get_SOcut_poly(a, a.x) for a in self.net.links if a.y == 1}
         oacut = {}
         for a in self.net.links:
@@ -131,7 +131,7 @@ class GBModel:
         minlp.addConstr(sum(yvar[a] * a.cost for a in network.links2) <= network.B, name="B")
 
         xvar = minlp.addVars(network.links, vtype=GRB.CONTINUOUS, lb=0.0, ub=network.TD, name="x")
-        minlp.addConstrs((xvar[a] <= yvar[a] * network.TD for a in network.links2), name="M")
+        mctrs = minlp.addConstrs((xvar[a] <= yvar[a] * network.TD for a in network.links2), name="M")
 
         xsvar = minlp.addVars(network.links, network.zones, vtype=GRB.CONTINUOUS, lb=0.0, ub=network.TD, name="xs")
         minlp.addConstrs((sum(xsvar[a, s] for a in i.outgoing)
@@ -146,7 +146,7 @@ class GBModel:
         minlp.setObjective(cvar.sum(), GRB.MINIMIZE)
         minlp.update()
         minlp.write('model.lp')
-        return minlp, yvar, xvar, cvar
+        return minlp, yvar, xvar, cvar, mctrs
 
     def addNLcost(self):
         """ gurobi does not allow yet to add the convex polynomial constraint c >= x.t(x)...
@@ -221,13 +221,15 @@ class GBModel:
         return cost
 
     def simulate_n_checkNLP(self, ysol: dict, yname: str):
-        print(f"-- simulate solution {yname}")
+        print(f"-- simulate solution {yname}: {ysol}")
         stime = time.time()
         self.net.resetTapas()
-        tstt = self.net.tapas('UE', ysol)
+        tstttapas = self.net.tapas('SO', ysol)
+        tsttmsa = self.net.msa('SO', ysol, self.allclose)
         xsol = {a: a.x for a in self.net.links}
-        print(f"TAPAS: {xsol}")
+        print(f"TAPAS: {tstttapas} MSA: {tsttmsa}")
         runtime = time.time() - stime
+        tstt = tsttmsa
         print(f"solution cost= {tstt}  runtime={runtime:.2f}")
 
         print(f"-- check full solution (y, xTAP) in NLP")
@@ -272,7 +274,7 @@ class DNDPOACallback:
 
 if __name__ == "__main__":
     net = 'SiouxFalls'
-    ins = 'SF_DNDP_10_1'
+    ins = 'SF_DNDP_20_1'
     datadir = ROOTDIR + "data/" + net + "/"
     ntk = Network.Network(datadir, ins, 0.5, 1e-0, 1e-3)
     print(net, ins)
@@ -325,5 +327,3 @@ if __name__ == "__main__":
     print(f"\n---------------------- OAD {noacuts_init} cuts/arc")
     print(f"OA dynamic solution yOA: {oadsol}")
     print(f"cost= OAD relax: {oadcost}, TAP(yOAD): {oadtstt}, NLP(yOAD): {oadnlpcost}, NLP(yOAD,xOAD): {oadnlpcost2}")
-
-# @todo why TAP(yOAD) != OAD* = OAD(yOAD) = NLP(yOAD, xOAD) ? Bad use of msa ?

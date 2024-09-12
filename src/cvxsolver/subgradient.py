@@ -24,7 +24,7 @@ class SubGradient(CvxSolver):
     AGILITY_MAX = 1e-2
 
     def __init__(self, oracle: Oracle, lb_init: float):
-        CvxSolver.__init__(self, oracle)
+        CvxSolver.__init__(self, oracle, "SG")
         self.nbsteps = {}
         self.lb_init = lb_init
 
