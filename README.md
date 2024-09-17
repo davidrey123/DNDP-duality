@@ -3,7 +3,8 @@
 ## Usage for solving the Lagrangian dual:
 1. define the Lagrangian dual function (or its opposite) as a convex function **f(x)** by implementing *Oracle* and the main function *oracle(x)*
 which returns **(f(x),s,y):** the value at **x**, a subgradient at **x**, and an optimal solution of the lagrangian subproblem.
-Example: *DNDPOracle* in *lagsodndp.py* implements the dual function of SO-DNDP when dualizing the big-M linearization of the indicator constraint
+Example 1: *DNDPOracle* in *dual-indicator.py* implements the dual function of SO-DNDP when dualizing the big-M linearization of the indicator constraints
+Example 2: *DualFlowOracle* in *dual-flowcoupling.py* implements the dual function of SO-DNDP when dualizing the flow coupling constraints
 2. select an oracle-based solver for minimizing the convex function (in the dual space) as an implementation of *CvxSolver* in *cvxsolver.py*: *SubGradient*, *ProximalBundle*
 3. run *CvxSolver.solve(x0)* from the initial dual candidate **x0**
 
@@ -22,7 +23,7 @@ thus it returns an approximation for **f(x)** and for a subgradient at **x** giv
 In turn, it can be embedded in any CvxSolver
 4. an *ADMM* solver is also available in *admm.py* for minimizing **-f** by calling iteratively the two blocks and the update of **u** (for a fixed penalty **r**)
 Convergence is guaranteed if **c** and **g** are convex
-5. *BlockDNDPOracle* in *lagsodndp.py* provides an implementation of BlockOracle for the augmented lagrangian relaxation of SO-DNDP when dualizing the bilinear complementary constraint.
+5. *BlockDNDPOracle* in *dual-indicator.py* provides an implementation of BlockOracle for the augmented lagrangian relaxation of SO-DNDP when dualizing the bilinear indicator constraint.
 As it is not convex, we have no convergence guarantee, still it can provides primal feasible solution at the end
 
 ## Usage for solving the MINLP

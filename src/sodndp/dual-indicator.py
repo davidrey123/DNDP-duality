@@ -3,6 +3,12 @@
 """
 Created on Mon Jul 24 17:28:06 2024
 
+Penalization and block coordination for SO-DNDP: min_{x,y} f(x)= sum_a x_a.t_a(x_a): TAP(x), g.y <= B, y=0 => x=0
+by dualizing the indicator constraints y=0 => x=0:
+- lagrangian for the big-M model (x <= My) -> valid primal and dual bounds
+- ADMM and augmented lagrangian with approx oracles (PWL approx or 1-iteration Gauss-Seidel)
+for the QP model (x(1-y)<= 0) -> only primal bounds
+
 @author: Sophie Demassey
 """
 
@@ -17,7 +23,7 @@ from src.cvxsolver.cvxsolver import CvxSolver, Oracle
 from src.cvxsolver.subgradient import SubGradient
 from src.cvxsolver.proximalbundle import ProximalBundle
 from src.cvxsolver.admm import Admm
-from src.decomposition.gbmodel import GBModel
+from src.sodndp.gbmodel import GBModel
 from src.tapas import Network
 
 INDIR = "../../data/"
@@ -447,8 +453,8 @@ if __name__ == "__main__":
              'A': "auglag admm (inexact dual)", 'AB': "auglag GS1 bdle (inexact dual)",
              'ABG': "auglag GBPWL bdle (inexact dual)"}
 
-    instance = 'SF_DNDP_20_1'
-    m = 'ABG'
+    instance = 'SF_DNDP_10_1'
+    m = 'B'
 
     logger.info(f"Solver = {modes[m]}")
     lagsolver = Lagrangian(instance, m)

@@ -3,6 +3,9 @@
 """
 Created on Mon Jul 22 15:57:46 2024
 
+convex MINLP model within Gurobi API for SO-DNDP: min_{x,y} f(x)= sum_a x_a.t_a(x_a): TAP(x), g.y <= B, x <= M.y
+solution methods: MINLP solver, PWL approximation, OA relaxation, progressive OA cut generation
+
 @author: Sophie Demassey
 """
 import logging
@@ -274,7 +277,7 @@ class DNDPOACallback:
 
 if __name__ == "__main__":
     net = 'SiouxFalls'
-    ins = 'SF_DNDP_20_1'
+    ins = 'SF_DNDP_10_1'
     datadir = ROOTDIR + "data/" + net + "/"
     ntk = Network.Network(datadir, ins, 0.5, 1e-0, 1e-3)
     print(net, ins)
