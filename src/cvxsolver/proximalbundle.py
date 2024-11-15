@@ -43,6 +43,8 @@ class ProximalBundle(CvxSolver):
         self.bundle = None
         self.nbsteps = None
         self.noisatt = False
+        if self.oracle_obj.integer_points:
+            self.PRIMAL = True
 
     def init_solve(self):
         CvxSolver.init_solve(self)
@@ -126,7 +128,7 @@ class ProximalBundle(CvxSolver):
             self.store_iteration(serious, it, fx, normsgagg, vals)
 
             # UPDATE BUNDLE
-            if len(self.bundle) < self.BDL_SZ_MAX:
+            if len(self.bundle) < self.BDL_SZ_MAX or self.oracle_obj.integer_points:
                 self.bundle.append([gx, errx, sx])
             else:
                 # @todo !!!!!!!!! QUESTION !!!!!!!!!! in the constrained case:
@@ -149,7 +151,7 @@ class ProximalBundle(CvxSolver):
         ff = 1 + abs(self.fxc)
         if (erragg <= self.TOL * ff) and (normsgagg <= self.TOL * ff):
             logger.info(f"bdle STOP: erragg: {erragg}, |sgagg|: {normsgagg}")
-            aggregate_sol = self.aggregate_primal_solution(mu)
+            # aggregate_sol = self.aggregate_primal_solution(mu)
             self.set_final_solution()
         # noise attenuation [Kiwiel06]; decuple t if erragg is overly negative and solve again
         elif erragg <= -0.999 * 2 * proximity and nb_noisatt < self.MAX_NOISE:
@@ -182,7 +184,8 @@ class ProximalBundle(CvxSolver):
 
         model = gp.Model('bdldir')
         model.Params.OutputFlag = 0
-        d = model.addVars(dim, lb=-GRB.INFINITY, name='d')
+        vtype = GRB.INTEGER if self.oracle_obj.integer_points else GRB.CONTINUOUS
+        d = model.addVars(dim, lb=-GRB.INFINITY, vtype=vtype, name='d')
         y = model.addVar(lb=-GRB.INFINITY, name='y')
         obj = y
         for i in range(dim):
@@ -192,7 +195,10 @@ class ProximalBundle(CvxSolver):
         model.setObjective(obj, GRB.MINIMIZE)
         bdlctr = model.addConstrs(y >= gp.quicksum(self.bundle[k][0][i] * d[i] for i in range(dim))
                                   - self.bundle[k][1] for k in range(bdlsz))
-
+        addcoeff = self.oracle_obj.add_primal_constraint()
+        if addcoeff:
+            assert len(addcoeff) == dim + 1
+            model.addConstr(gp.quicksum((d[i] + self.xc[i]) * addcoeff[i] for i in range(dim)) <= addcoeff[-1])
         model.optimize()
         # model.write("zeqp.lp")
         if model.Status != GRB.OPTIMAL:
@@ -205,7 +211,7 @@ class ProximalBundle(CvxSolver):
         decr_nominal = - obj.getValue()
         proximity = decr_predict - decr_nominal
         erragg = decr_predict - 2 * proximity
-        mu = [bdlctr[k].Pi for k in range(bdlsz)]
+        mu = 0 if self.oracle_obj.integer_points else [bdlctr[k].Pi for k in range(bdlsz)]
         return x, mu, decr_predict, proximity, sgagg, erragg
 
     # noinspection PyTypeChecker

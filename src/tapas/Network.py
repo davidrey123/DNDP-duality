@@ -309,6 +309,13 @@ class Network:
 
         return output
 
+    def getNodePrices(self, type):
+        nodeprices = {}
+        for r in self.origins:
+            self.dijkstras(r, type)
+            nodeprices[r] = {s: s.cost for s in self.zones if r.getDemand(s) > 0}
+        return nodeprices
+
     # returns the total number of trips in the network
     def getTotalTrips(self):
         output = 0.0
@@ -377,13 +384,15 @@ class Network:
     def msa(self, type, y, lbd):
         
         # ---only use if needed for comparison
-        self.resetMsa()
-        
+        # self.resetMsa()
+
         self.setY(y)
         self.setType(type)        
         
         max_iteration = self.params.msa_max_iter
         min_gap = self.params.min_gap
+        print(f"msa: min_gap={min_gap}")
+
 
         for a in self.links2:
             if type == 'AUEL':

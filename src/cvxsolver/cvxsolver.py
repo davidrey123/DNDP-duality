@@ -23,11 +23,13 @@ class Oracle:
     """Abstract oracle: get the zero and first order information for a convex function f defined over R^n
         oracle: Oracle objectmapping x -> (f(x), g, s) with f convex, g a subgradient of f at x, s
         positive_quadrant: is f defined on x >= 0 or not ?
+        integer_points: is f defined on x integer or not ?
     """
 
-    def __init__(self, id_: str, positive_quadrant=False):
+    def __init__(self, id_: str, positive_quadrant=False, integer_points=False):
         self.id: str = id_
         self.positive_quadrant = positive_quadrant
+        self.integer_points = integer_points
 
     def oracle(self, x):
         """ get the zero and first information at point x as a tuple
@@ -62,6 +64,9 @@ class Oracle:
             y (list): the associated primal solution if any
         """
         pass
+
+    def add_primal_constraint(self):
+        return []
 
 
 class CvxSolver:
@@ -137,8 +142,8 @@ class CvxSolver:
         fig, axes = plt.subplots(nrows=1, ncols=dim+1, figsize=(20, 3))
         date = time.strftime("%y-%m-%d-%H:%M", time.gmtime())
         fig.suptitle(f"{self.oracle_obj.id} {self.name} {date} - cpu={self.time():.1f} it={max(its)+1}", fontsize=10)
-        #cmap = plt.get_cmap('gnuplot')
-        #colors = cmap(range(len(self.axes)))
+        # cmap = plt.get_cmap('gnuplot')
+        # colors = cmap(range(len(self.axes)))
         colors = "rgbcmyrgbcmyrgbcmy"
         for (i, a) in enumerate(self.axes):
             if a >= 0:
@@ -160,4 +165,3 @@ class CvxSolver:
 
     def get_relaxed_solution(self):
         return self.lb, self.lbsol
-

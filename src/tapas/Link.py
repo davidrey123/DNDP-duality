@@ -42,9 +42,12 @@ class Link:
 
     def getTravelTime(self, x, type):
         """ return f(x) such that the link cost is c(x) = int_0^x f(v)dv for a given type. """
-        if (self.y == 0 and type !='L'):
+        if self.y == 0 and type != 'L':
             return Params.INFTY
-            
+        return self.gettt(x, type)
+
+    def gettt(self, x, type):
+        """ return f(x) such that the link cost is c(x) = int_0^x f(v)dv for a given type. """
         # UE: f(x) = t(x) = tff(1+a.(x/C)^b)
         if type == 'UE':
             output = self.t_ff * (1 + self.alpha * pow(x / self.C, self.beta))

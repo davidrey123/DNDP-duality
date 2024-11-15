@@ -2,15 +2,23 @@
 # -*- coding: utf-8 -*-
 """
 Created on Mon Jul 22 15:57:46 2024
-
-convex MINLP model within Gurobi API for SO-DNDP: min_{x,y} f(x)= sum_a x_a.t_a(x_a): TAP(x), g.y <= B, x <= M.y
-solution methods: MINLP solver, PWL approximation, OA relaxation, progressive OA cut generation
-
 @author: Sophie Demassey
+
+convex MINLP model within Gurobi API for SO-DNDP:
+min_{x,y} c : TAP(x), g.y <= B, x <= M.y, c_a >= x_a.t_a(x_a)
+solved with different methods for handling the NL constraints c_a >= x_a.t_a(x_a):
+- Gurobi default nonconvex MINLP solver: c_a == x_a.t_a(x_a)
+- Gurobi default PWL approximation: c_a == PWL(x_a.t_a(x_a))
+- OA relaxation: c_a >= X_a.t(X_a) + [t(X_a) + x_a.dt(X_a)].(x_a - X_a) for X generated evenly
+- progressive OA cut generation at each integer node Y for X the current relaxed MILP flow solution
+- LP-NLP BB: progressive OA cut generation at each integer node Y for X optimum of SO-TAP(Y)
+- OA algorithm: iterative OA cut generation at each optimal relaxed solution Y for X optimum of SO-TAP(Y)
+
 """
 import logging
 import time
 from pathlib import Path
+import matplotlib.pylab as plt
 
 import gurobipy as gp
 from gurobipy import GRB
@@ -88,35 +96,34 @@ class GBModel:
         c0 = - c * e * pow(x, e + 1)  # = -pow(a.x,2) * a.getDerivativeTravelTime(a.x) = - x^2.c.e.x^(e-1)
         return c0, c1
 
-    def generateOAcuts(self, ysol: dict):
+    def generate_SOcost_OAcuts(self, ysol: dict):
         """
-        computes the optimal TAP flow X for configuration y
+        computes the optimal SO-TAP flow X for configuration y
         min_{x} sum_a c_a: TAP(x), y=0 => x=0, c_a= x_a.t(x_a)
         then generate the OA cuts: c_a >= X_a.t(X_a) + [t(X_a) + x_a.dt(X_a)].(x_a - X_a) for X_a > 0
         and add them as constraints to the model
         """
-        tstt = self.net.msa('SO', ysol, self.allclose)
-        logging.debug(f"TAP: SO={tstt}")
+        # tstt = self.net.msa('SO', ysol, self.allclose)
+        tstt = self.net.tapas('SO', ysol)
+        logging.info(f"TAP: SO={tstt}")
         # oacut = {a: GBModel.get_SOcut_poly(a, a.x) for a in self.net.links if a.y == 1}
         oacut = {}
         for a in self.net.links:
             if a.y == 1:
                 c0, c1 = GBModel.get_SOcut_poly(a, a.x)
                 oacut[a] = (self.cvar[a] >= c0 + c1 * self.xvar[a])
-        return oacut
+        flowsol = {a: a.x for a in self.net.links}
+        return tstt, oacut, flowsol
 
-    def generateOAevenly(self, ncuts: int):
+    def generate_SOcost_OActrs_evenly(self, ncuts: int, small=False):
         """
-        computes the optimal TAP flow for configuration y and cost perturbed with u
-        f(y) = min_{x} x.(t(x) + u[0] + u[1]*x): TAP(x), y=0 => x=0
-
-        Returns:
-            tstt (float): the 'UE' flow cost
-            f(y) (float): the 'costtype' flow cost
-            sx (dict): the optimal flow solution
+        generate the supporting planes for functions x_a.t(x_a) for all a:
+        c_a >= X^i_a.t(X^i_a) + [t(X^i_a) + x_a.dt(X^i_a)].(x_a - X^i_a)
+        for X^1_a,...,X^N_a taken evenly in the interval [0,ub] with N=ncuts
         """
         assert not self.costmodel, f"constraints c(x)=x.t(x) already generated: {self.costmodel}"
-        delta = self.net.TD / ncuts
+        maxcut = self.net.TD/len(self.net.zones) if small else self.net.TD
+        delta = maxcut / ncuts
         x = 0
         for i in range(ncuts):
             x += delta
@@ -125,6 +132,19 @@ class GBModel:
                 self.minlp.addConstr(self.cvar[a] >= c0 + c1 * self.xvar[a])
         logging.debug(f"generate {ncuts * len(self.net.links)} OA cuts")
         self.costmodel = f"OA{ncuts}"
+
+    def generate_SOcost_NLctrs(self):
+        """
+        generate the nonlinear constraints c_a = x_a.t(x_a) for all a:
+        note that gurobi does not allow yet to add the convex polynomial constraint c >= x.t(x)...
+        thus we add the nonconvex constraint c == x.t(x) instead
+        """
+        if self.costmodel:
+            logging.debug(f"constraints c(x)=x.t(x) already generated: {self.costmodel}")
+            return
+        for a in self.net.links:
+            self.minlp.addGenConstrPoly(self.xvar[a], self.cvar[a], GBModel.get_SO_poly_reverse(a))
+        self.costmodel = "NL"
 
     @staticmethod
     def build_model(network: Network):
@@ -151,19 +171,9 @@ class GBModel:
         minlp.write('model.lp')
         return minlp, yvar, xvar, cvar, mctrs
 
-    def addNLcost(self):
-        """ gurobi does not allow yet to add the convex polynomial constraint c >= x.t(x)...
-        thus we add the nonconvex constraint c == x.t(x) instead """
-        if self.costmodel:
-            logging.debug(f"constraints c(x)=x.t(x) already generated: {self.costmodel}")
-            return
-        for a in self.net.links:
-            self.minlp.addGenConstrPoly(self.xvar[a], self.cvar[a], GBModel.get_SO_poly_reverse(a))
-        self.costmodel = "NL"
-
     def getsol(self, vardict: dict, isint=False):
         assert self.minlp.status == GRB.OPTIMAL
-        return {a: int(v.x) if isint else v.x for (a, v) in vardict.items()}
+        return {a: round(v.x) if isint else v.x for (a, v) in vardict.items()}
 
     def getSolution(self, varname='y'):
         if varname == 'x':
@@ -171,6 +181,13 @@ class GBModel:
         if varname == 'c':
             return self.getsol(self.cvar)
         return self.getsol(self.yvar, isint=True)
+
+    def getFullSolution(self):
+        return [v.x for v in self.minlp.getVars()]
+
+    def setStartSolution(self, vals: list):
+        for i, v in enumerate(self.minlp.getVars()):
+            v.start = vals[i]
 
     def setYsolution(self, ysol: dict[Link, int]):
         for (a, y) in self.yvar.items():
@@ -186,26 +203,89 @@ class GBModel:
             self.xvar[a].lb = flow[a] - tol
             self.xvar[a].ub = flow[a] + tol
 
+    def solveOA(self):
+        """ run the OA algorithm on model min_{x} sum_a c_a: TAP(x), y=0 => x=0, OA(c_a= x_a.t(x_a)):
+        iterate on: solve the relaxed MILP at optimality; solve the restricted NLP; generate the new OA cuts. """
+        runtime = time.perf_counter()
+        milptimes = 0
+        MAX_ITER = 10
+        OATOL = 1e-4
+        ub = GRB.INFINITY
+        lb = 0
+        ncuts = 0
+        iters = {"lb": [], "tap": [], "ub": [], "mipt": [], "t": []}
+
+        for i in range(MAX_ITER):
+            self.minlp.optimize()
+            milptimes += self.minlp.runtime
+
+            if self.minlp.status != GRB.OPTIMAL:
+                print('Optimization was stopped with status %d' % self.minlp.status)
+                break
+
+            lb = self.minlp.objval
+            iters["lb"].append(lb)
+            iters["mipt"].append(milptimes)
+
+            if (ub - lb)/lb < OATOL:
+                print(f"OA STOP: abs gap = {ub}-{lb}={ub-lb}; rel gap < {OATOL}")
+                break
+
+            ysol = self.getSolution()
+            tstt, oacuts, flowsol = self.generate_SOcost_OAcuts(ysol)
+            iters["tap"].append(tstt)
+            iters["ub"].append(min(ub, tstt))
+            iters["t"].append(time.perf_counter()-runtime)
+            if ub > tstt:
+                ub = tstt
+                print(f"OA new incumbent: {ub} y={ysol}")
+                if (ub - lb) / lb < OATOL:
+                    print(f"OA STOP: abs gap = {ub}-{lb}={ub - lb}; rel gap < {OATOL}")
+                    break
+
+            # @ todo restart with SO-TAP solution / cutoff the cost
+
+            for a, c in oacuts.items():
+                self.minlp.addConstr(c)
+            ncuts += len(oacuts)
+            print(f"OA it {i}: ub={ub} lb={lb} ncuts={ncuts} "
+                  f"milptime={milptimes:.2f} runtime={time.perf_counter()-runtime:.2f}")
+
+        runtime = time.perf_counter() - runtime
+        print(f"oa: solution ub={ub} lb={lb} gap={ub-lb} milptime={milptimes:.2f} runtime={runtime:.2f}")
+        self.show_iters(iters)
+        return ub, runtime
+
     def solve(self, otype: str, ncuts=10):
-        """Solve the convex relaxation model cvxmodel."""
+        """Solve SO-DNDP: min_{x} sum_a c_a: TAP(x), y=0 => x=0, c_a= x_a.t(x_a)
+        by handling the NL constraints c_a= x_a.t(x_a) in different ways according to otype:
+        NL: nonconvex NL model, PWL: PWL approx model, OAR: OA relaxation, OAD: OA dynamic cut generation,
+        OAT: LP-NLP B&B algorithm, OA: OA algorithm. """
         cost = 0
         cback = None
         self.minlp.setParam(GRB.Param.OutputFlag, False)
         if otype == 'pwl':
-            self.addNLcost()
+            self.generate_SOcost_NLctrs()
             self.minlp.setParam(GRB.Param.FuncNonlinear, 0)
             # self.minlp.setParam(GRB.Param.FuncPieceRatio, 0)
             # self.minlp.setParam(GRB.Param.FuncPieces, -1)
             # self.minlp.setParam(GRB.Param.FuncPieceError, 1e-2)
         elif otype == 'nl':
-            self.addNLcost()
+            self.generate_SOcost_NLctrs()
             self.minlp.setParam(GRB.Param.FuncNonlinear, 1)
-        elif otype == 'oa':
-            self.generateOAevenly(ncuts)
+        elif otype == 'oar':
+            self.generate_SOcost_OActrs_evenly(ncuts)
         elif otype == 'oad':
-            self.generateOAevenly(ncuts)
+            self.generate_SOcost_OActrs_evenly(ncuts, small=True)
             self.minlp.Params.LazyConstraints = 1
             cback = DNDPOACallback(self)
+        elif otype == 'oat':
+            self.generate_SOcost_OActrs_evenly(ncuts, small=True)
+            self.minlp.Params.LazyConstraints = 1
+            cback = DNDPTAPCallback(self)
+        elif otype == 'oa':
+            self.generate_SOcost_OActrs_evenly(ncuts, small=True)
+            return self.solveOA()
 
         self.minlp.optimize(cback)
 
@@ -214,36 +294,59 @@ class GBModel:
             self.minlp.computeIIS()
             self.minlp.write(str(IISFILE))
 
+        runtime = self.minlp.runtime
+
         if self.minlp.status != GRB.OPTIMAL:
             print('Optimization was stopped with status %d' % self.minlp.status)
         else:
             cost = self.minlp.objval
             bctr = self.minlp.getConstrByName("B")
-            runtime = self.minlp.runtime
             print(f"{otype}: solution cost={cost} slack={bctr.Slack} ({bctr.RHS}) runtime={runtime:.2f}")
-        return cost
+        return cost, runtime
 
     def simulate_n_checkNLP(self, ysol: dict, yname: str):
+        """Optimize SO-TAP for a given design y: min_{x} sum_a c_a: TAP(x), y=0 => x=0, c_a= x_a.t(x_a)
+        then check the cost of the solution in the MINLP model. """
         print(f"-- simulate solution {yname}: {ysol}")
         stime = time.time()
-        self.net.resetTapas()
         tstttapas = self.net.tapas('SO', ysol)
+        min_gap = self.net.params.min_gap
+        self.net.params.min_gap = max(min_gap, 1e-2)
         tsttmsa = self.net.msa('SO', ysol, self.allclose)
+        self.net.params.min_gap = min_gap
         xsol = {a: a.x for a in self.net.links}
         print(f"TAPAS: {tstttapas} MSA: {tsttmsa}")
         runtime = time.time() - stime
         tstt = tsttmsa
         print(f"solution cost= {tstt}  runtime={runtime:.2f}")
 
-        print(f"-- check full solution (y, xTAP) in NLP")
+        print(f"-- check full solution ({yname}, xTAP) in NLP")
         self.setYsolution(ysol)
         self.setXsolution(xsol)
-        nlpcost = self.solve(otype='nl')
+        nlpcost, runtime = self.solve(otype='nl')
         return tstt, nlpcost
+
+    @staticmethod
+    def show_iters(iters):
+        dim = 2
+        nits = len(iters['lb'])
+        fig, axes = plt.subplots(nrows=1, ncols=dim, figsize=(20, 3))
+        date = time.strftime("%y-%m-%d-%H:%M", time.gmtime())
+        fig.suptitle(f"OA {date} - cpu={iters['t'][-1]:.1f} it={nits}", fontsize=10)
+        colors = "rgbcmyrgbcmyrgbcmy"
+        axes[0].plot(iters['lb'], color='b', label='lb')
+        axes[0].plot(iters['tap'], color='g', label='tap')
+        axes[0].plot(iters['ub'], color='r', label='ub')
+        axes[1].plot(iters['t'], color='r', label='time')
+        axes[1].plot(iters['mipt'], color='b', label='mip')
+        fig.tight_layout()
+        fig.legend()
+        plt.savefig('iter_oa_xyz.png')
 
 
 class DNDPOACallback:
-
+    """ a callback to generate OA cuts c_a >= X_a.t(X_a) + [t(X_a) + x_a.dt(X_a)].(x_a - X_a) forall a
+    for X being the flow solution associated to a given MIPSOL node. """
     def __init__(self, gbm: GBModel):
         self.gbm = gbm
 
@@ -251,7 +354,7 @@ class DNDPOACallback:
     def __call__(self, m, where):
         if where == GRB.Callback.MIPSOL:
             try:
-                ncuts = self.add_oacuts_at_mipsol(m)
+                ncuts = self.add_SOcost_oacuts_at_mipsol(m)
                 costmip = m.cbGet(GRB.Callback.MIPSOL_OBJ)
                 currentlb = m.cbGet(GRB.Callback.MIPSOL_OBJBND)
                 currentnode = int(m.cbGet(GRB.Callback.MIPSOL_NODCNT))
@@ -262,7 +365,7 @@ class DNDPOACallback:
                 logging.exception("Exception occurred in MIPSOL callback")
                 m.terminate()
 
-    def add_oacuts_at_mipsol(self, m):
+    def add_SOcost_oacuts_at_mipsol(self, m):
         xsol = m.cbGetSolution(self.gbm.xvar)
         csol = m.cbGetSolution(self.gbm.cvar)
         oacuts = {a: GBModel.get_SOcut_poly(a, xsol[a]) for a in self.gbm.net.links}
@@ -275,58 +378,122 @@ class DNDPOACallback:
         return len(oacuts)
 
 
+class DNDPTAPCallback:
+    """ a callback to generate OA cuts c_a >= X_a.t(X_a) + [t(X_a) + x_a.dt(X_a)].(x_a - X_a) forall a
+    for X being the flow solution of TAP(Y) with Y the integer solution associated to a given MIPSOL node. """
+
+    def __init__(self, gbm: GBModel):
+        self.gbm = gbm
+
+    # noinspection PyBroadException
+    def __call__(self, m, where):
+        if where == GRB.Callback.MIPSOL:
+            try:
+                ncuts, ysol, xsol = self.add_SOcost_oacuts_at_mipsol(m)
+                costmip = m.cbGet(GRB.Callback.MIPSOL_OBJ)
+                currentlb = m.cbGet(GRB.Callback.MIPSOL_OBJBND)
+                currentnode = int(m.cbGet(GRB.Callback.MIPSOL_NODCNT))
+                currentphase = int(m.cbGet(GRB.Callback.MIPSOL_PHASE))
+                print(f"MIPSOL #{currentnode} P{currentphase}: obj={costmip} lb={currentlb:.2f} ncuts={ncuts}")
+                # if currentnode > 0:
+                #    self.setTAPsol(m, ysol, xsol)
+
+            except Exception:
+                logging.exception("Exception occurred in MIPSOL callback")
+                m.terminate()
+
+    def add_SOcost_oacuts_at_mipsol(self, m):
+        ysol = {a: round(ya) for (a, ya) in m.cbGetSolution(self.gbm.yvar).items()}
+        ub, oacuts, flowsol = self.gbm.generate_SOcost_OAcuts(ysol)
+        for a, c in oacuts.items():
+            m.cbLazy(c)
+        return len(oacuts), ysol, flowsol
+
+    def setTAPsol(self, m, ysol: dict[Link, float], flow: dict[Link, float]):
+        assert len(ysol) == len(self.gbm.yvar) and len(flow) == len(self.gbm.xvar)
+        xyvars = [v for a, v in self.gbm.xvar.items()] + [v for a, v in self.gbm.yvar.items()]
+        xyvals = [flow[a] for a, v in self.gbm.xvar.items()] + [ysol[a] for a, v in self.gbm.yvar.items()]
+        m.cbSetSolution(xyvars, xyvals)
+        # m.cbUseSolution()
+
+
+def solve(ntk, otype, noacuts=0):
+    zestr = otypes[otype]
+    if noacuts:
+        zestr += f" {noacuts} ctrs/arc"
+    print(f"\n\n-- solve {zestr} --")
+    model = GBModel(ntk)
+    cost, time = model.solve(otype)
+    ysol = model.getSolution()
+    xsol = model.getSolution('x')
+    return {'c': cost, 't': time, 'y': ysol, 'x': xsol}
+
+
+def simulate(ntk, otype, ysol, xsol):
+    print(f"-- check solution y{otype} in NLP")
+    mnlp = GBModel(ntk)
+    tstt, nlpcost = mnlp.simulate_n_checkNLP(ysol, f"y+{otype}")
+    nxsol = mnlp.getSolution('x')
+    res = {'tap': tstt, 'nlp': nlpcost, 'nlpx': nxsol}
+
+    print("diff flow {otype}/nlp:")
+    print(f"{otype}: {xsol} \nnlp: {nxsol}\n diff:")
+    print({a: abs(xsol[a] - nxsol[a]) for a in xsol})
+    return res
+
+
+def fullsimulate(ntk, otype, ysol, xsol):
+    print(f"-- check full solution (y{otype}, x{otype}) in NLP")
+    mnlp = GBModel(ntk)
+    mnlp.setYsolution(ysol)
+    mnlp.setXsolution(xsol, tol=1e-12)
+    cost, time = mnlp.solve(otype='nl')
+    return {'nlpxy': cost}
+
+
+def solvensim(ntk, otype, noacuts=0, sim=False, fsim=False):
+    res = solve(ntk, otype, noacuts)
+    if sim:
+        res.update(simulate(ntk, otype, res['y'], res['x']))
+    if fsim:
+        res.update(fullsimulate(ntk, otype, res['y'], res['x']))
+    return res
+
+
+def printresults(results):
+    for otype, res in results.items():
+        zestr = f"cost: {res['c']} "
+        if res.get('tap'):
+            zestr += f"TAP(y{otype}): {res['tap']}, NLP(y{otype}): {res['nlp']} "
+        if res.get('nlpxy'):
+            zestr += f"NLP(y{otype},x{otype}): {res['nlpxy']} "
+        print(f"\n---------------------- {otype} {res['t']:.2f} s")
+        print(f"y{otype}: {res['y']}")
+        print(zestr)
+
+
 if __name__ == "__main__":
     net = 'SiouxFalls'
     ins = 'SF_DNDP_10_1'
     datadir = ROOTDIR + "data/" + net + "/"
-    ntk = Network.Network(datadir, ins, 0.5, 1e-0, 1e-3)
+    netwk = Network.Network(datadir, ins, 0.5, 1e-0, 1e-3)
     print(net, ins)
 
     otypes = {"nl": "nonlinear c(x)=x.t(x)",
               "pwl": "pwl approximation",
-              "oa": "oa relaxation",
-              "oad": "oa dynamic relaxation"}
+              "oar": "oa relaxation",
+              "oad": "oa dynamic relaxation",
+              "oa": "oa algorithm",
+              "oat": "lpnlp algorithm"}
 
-    print("\n-- solve PWL approx --")
-    model = GBModel(ntk)
-    pwlcost = model.solve(otype='pwl')
-    pwlsol = model.getSolution()
-    pwltstt, pwlnlpcost = model.simulate_n_checkNLP(pwlsol, "yPWL")
+    netwk.params.min_gap = 1e-4
+    netwk.params.warmstart = True
 
-    noacuts = 100
-    print(f"\n-- solve OA relaxation {noacuts} ctrs/arc  --")
-    modelOA = GBModel(ntk)
-    oacost = modelOA.solve(otype='oa', ncuts=noacuts)
-    oasol = modelOA.getSolution()
-    oatstt, oanlpcost = model.simulate_n_checkNLP(oasol, "yOA")
+    result = {}
+    result['oa'] = solvensim(netwk, 'oa', noacuts=3, sim=True, fsim=False)
+    result['pwl'] = solvensim(netwk, 'pwl', sim=True, fsim=False)
+    result['oar'] = solvensim(netwk, 'oar', noacuts=100, sim=True, fsim=False)
+    result['oad'] = solvensim(netwk, 'oad', noacuts=3, sim=True, fsim=True)
+    result['oat'] = solvensim(netwk, 'oat', noacuts=3, sim=True, fsim=False)
 
-    noacuts_init = 3
-    print(f"\n-- solve OA dynamic relaxation {noacuts_init} ctrs/arc  --")
-    modelOAD = GBModel(ntk)
-    oadcost = modelOAD.solve(otype='oad', ncuts=noacuts_init)
-    oadsol = modelOAD.getSolution()
-    oadtstt, oadnlpcost = model.simulate_n_checkNLP(oadsol, "yOAD")
-    oadflow = modelOAD.getSolution('x')
-    nlpflow = model.getSolution('x')
-    print(f"oad: {oadflow}")
-    print(f"nlp: {nlpflow}")
-    print("diff:")
-    print({a: abs(oadflow[a] - nlpflow[a]) for a in oadflow})
-
-    print(f"-- check full solution (yOAD, xOAD) in NLP")
-    modelNLP = GBModel(ntk)
-    modelNLP.setYsolution(oadsol)
-    modelNLP.setXsolution(oadflow, tol=1e-12)
-    oadnlpcost2 = modelNLP.solve(otype='nl')
-
-    print(f"\n---------------------- PWL")
-    print(f"PWL approx solution yPWL: {pwlsol}")
-    print(f"cost= PWL approx: {pwlcost}, TAP(yPWL): {pwltstt}, NLP(yPWL): {pwlnlpcost}")
-
-    print(f"\n---------------------- OA {noacuts} cuts/arc")
-    print(f"OA relaxed solution yOA: {oasol}")
-    print(f"cost= OA relax: {oacost}, TAP(yOA): {oatstt}, NLP(yOA): {oanlpcost}")
-
-    print(f"\n---------------------- OAD {noacuts_init} cuts/arc")
-    print(f"OA dynamic solution yOA: {oadsol}")
-    print(f"cost= OAD relax: {oadcost}, TAP(yOAD): {oadtstt}, NLP(yOAD): {oadnlpcost}, NLP(yOAD,xOAD): {oadnlpcost2}")
+    printresults(result)
